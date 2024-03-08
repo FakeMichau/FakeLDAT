@@ -1,0 +1,40 @@
+
+<head>
+  <style>
+    body {
+      background-color: black;
+      color: white;
+    }
+    .white {
+      background-color: white !important;
+    }
+  </style>
+</head>
+<body>
+
+<script>
+  let delay = 0;
+  // document.addEventListener('keyup', function(event) {
+  //   if (event.key === 'x') {
+  //     setTimeout(() => document.body.classList.toggle('white'), delay)
+  //   }
+  // });
+
+  // document.addEventListener('keydown', function(event) {
+  //   if (event.key === 'x') {
+  //     setTimeout(() => document.body.classList.add('white'), delay)
+  //   }
+  // });
+  // document.addEventListener('keyup', function(event) {
+  //   if (event.key === 'x') {
+  //     setTimeout(() => document.body.classList.remove('white'), delay)
+  //   }
+  // });
+
+  document.addEventListener('mousedown', function(event) {
+    setTimeout(() => document.body.classList.add('white'), delay)
+  });
+  document.addEventListener('mouseup', function(event) {
+    setTimeout(() => document.body.classList.remove('white'), delay)
+  });
+</script>
