@@ -7,7 +7,7 @@ show_graph = True
 serial_cmd = ["stdbuf", "-oL", "cat", "/dev/ttyACM0"]
 
 def calc_threshold(values: deque) :
-    return sum(values) / len (values) * 0.95
+    return sum(values) / len (values) / 0.92
 
 last_button_state = 0
 button_high_time = None  # Time when button went high
@@ -53,7 +53,7 @@ try:
                         button_high_time = float(data[0])
                     last_button_state = button_state
 
-                if brightness < calc_threshold(brightness_avg) and brightness_low_time is None and button_high_time is not None:
+                if brightness > calc_threshold(brightness_avg) and brightness_low_time is None and button_high_time is not None:
                     brightness_low_time = float(data[0])
 
                 if brightness_low_time is not None:

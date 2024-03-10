@@ -5,7 +5,7 @@ static SAMPLES: usize = 150;
 fn calc_threshold(values: &VecDeque<usize>) -> usize {
     let sum: usize = values.iter().sum();
     let threshold = sum / values.len();
-    (threshold as f64 * 0.95) as usize
+    threshold + 150
 }
 
 fn append_const_size<T>(vec: &mut VecDeque<T>, value: T) {
@@ -49,7 +49,7 @@ fn main() {
                             last_button_state = button_pressed;
                         }
 
-                        if brightness < calc_threshold(&brightness_avg)
+                        if brightness > calc_threshold(&brightness_avg)
                             && brightness_low_time.is_none()
                             && button_high_time.is_some()
                         {
