@@ -1,0 +1,14 @@
+[package]
+name = "gui"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "fakeldat-gui"
+path = "src/main.rs"
+
+[dependencies]
+fakeldat_lib = { path = "../fakeldat_lib" }
+iced = { git = "https://github.com/iced-rs/iced.git", rev = "3013463baa71504488a20436beb3db87ecb66df0", features = ["canvas", "tokio"]}
+plotters-iced = { path = "../external/plotters-iced" }
+plotters = "0.3"

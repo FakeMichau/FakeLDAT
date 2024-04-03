@@ -8,16 +8,45 @@ enum ReportMode {
   COMBINED
 };
 
-enum TriggerMode {
+enum ActionMode {
   MOUSE,
   KEYBOARD,
 };
 
 enum TriggerOverride {
-  NOOVERRIDE = -1,
   RELEASE,
-  PRESS
+  PRESS,
+  OVERRIDE_IN_PROGRESS,
+  NOOVERRIDE,
 };
+
+enum Command {
+  SET_POLL_RATE = 0x01,
+  GET_POLL_RATE = 0x21,
+  SET_REPORT_MODE = 0x02,
+  GET_REPORT_MODE = 0x22,
+  SET_THRESHOLD = 0x03,
+  GET_THRESHOLD = 0x23,
+  SET_ACTION = 0x04,
+  GET_ACTION = 0x24,
+  MANUAL_TRIGGER = 0x1F,
+  REPORT_RAW = 0x41,
+  REPORT_SUMMARY = 0x42,
+};
+
+// commands that can be received
+constexpr uint8_t allowed_commands[]{
+  SET_POLL_RATE,
+  GET_POLL_RATE,
+  SET_REPORT_MODE,
+  GET_REPORT_MODE,
+  SET_THRESHOLD,
+  GET_THRESHOLD,
+  SET_ACTION,
+  GET_ACTION,
+  MANUAL_TRIGGER,
+};
+constexpr uint8_t commands_count = sizeof(allowed_commands);
 
 
 class Sensor {
@@ -66,21 +95,38 @@ public:
   }
 };
 
-// class Action  {
-// };
+struct Action {
+  ActionMode mode;
+  uint8_t button_to_press = MOUSE_LEFT;
+  // uint8_t button_to_press = 'x';
+
+  Action(ActionMode new_mode) {
+    mode = new_mode;
+  }
+
+  void press() {
+    if (mode == MOUSE) Mouse.press(button_to_press);
+    if (mode == KEYBOARD) Keyboard.press(button_to_press);
+  }
+  void release() {
+    if (mode == MOUSE) Mouse.release(button_to_press);
+    if (mode == KEYBOARD) Keyboard.release(button_to_press);
+  }
+};
 
 #define HISTORY_SIZE 150
 
 class FakeLDAT {
-  Button*  trigger;
-  Sensor*  sensor;
-  uint64_t interval_us;
+  Button* trigger;
+  Sensor* sensor;
   uint64_t timestamp;
-  uint64_t trigger_high_timestamp;
+  uint64_t interval_us = 0;
+  uint64_t trigger_high_timestamp = 0;
+  uint16_t trigger_override_count = 0;
+  int16_t threshold = 150;
+  TriggerOverride trigger_override = NOOVERRIDE;
 
   const bool     trigger_on_press = true; // as opposed to on release
-  const uint8_t  mouse_to_press   = MOUSE_LEFT;
-  const uint16_t threshold        = 150;
 
   uint16_t calc_threshold(uint16_t current_value) {
     static uint16_t history[HISTORY_SIZE]{};
@@ -91,59 +137,169 @@ class FakeLDAT {
     count++;
     return sum / HISTORY_SIZE + threshold;
   }
+  void update_trigger_override() {
+    if (trigger_override == PRESS) trigger_override = OVERRIDE_IN_PROGRESS;
+    else if (trigger_override == RELEASE) trigger_override = NOOVERRIDE;
+    if (trigger_override == NOOVERRIDE) return;
+    if (trigger_override == OVERRIDE_IN_PROGRESS && trigger_override_count == 0) {
+      trigger_override = RELEASE;
+    }
+    else {
+      trigger_override_count--;
+    }
+  }
+  uint8_t calc_checksum(uint8_t buf[], uint8_t length) {
+    uint8_t checksum = 0;
+    for (int i = 0; i < length; i++) {
+      checksum += buf[i];
+    }
+    return checksum;
+  }
+  bool valid_checksum(uint8_t buf[], uint8_t length) {
+    uint8_t last_element_index = length - 1;
+    uint8_t checksum = calc_checksum(buf, last_element_index);
+    return buf[last_element_index] == checksum;
+  }
+  void write_report(uint8_t command, uint64_t timestamp, uint16_t brightness, uint8_t trigger) {
+    uint8_t checksum = command;
+    uint8_t bytes[13]{};
+    bytes[0] = command;
+    for (int i = 0; i < sizeof(timestamp); i++) {
+      bytes[1 + i] = (timestamp >> (8 * i)) & 0xFF;
+      checksum += bytes[1 + i];
+    }
+    for (int i = 0; i < sizeof(brightness); i++) {
+      bytes[9 + i] = (brightness >> (8 * i)) & 0xFF;
+      checksum += bytes[9 + i];
+    }
+    bytes[11] = trigger;
+    checksum += trigger;
+    bytes[12] = checksum;
+    Serial.write(bytes, sizeof(bytes));
+  }
+
 
 public:
-  TriggerOverride trigger_override = NOOVERRIDE;
+  ReportMode mode;
+  Action* action;
 
-  FakeLDAT(pin_size_t button_pin, pin_size_t sensor_pin, pin_size_t offset_pin, uint64_t rate = 2000) {
+  FakeLDAT(pin_size_t button_pin, pin_size_t sensor_pin, pin_size_t offset_pin, uint64_t rate, ReportMode report_mode, ActionMode action_mode) {
     trigger = new Button(button_pin);
     sensor = new Sensor(sensor_pin, offset_pin);
+    action = new Action(action_mode);
     timestamp = time_us_64();
-    trigger_high_timestamp = 0;
-    interval_us = 1000000 / rate;
+    set_rate(rate);
+    mode = report_mode;
   }
   ~FakeLDAT() {
     delete(trigger);
     delete(sensor);
+    delete(action);
   }
 
-  const uint64_t get_interval() {
-    return interval_us;
-  }
   void update() {
     sensor->measure();
     timestamp = time_us_64();
     switch (trigger_override) {
     case RELEASE:
-      Mouse.release(mouse_to_press);
+      action->release();
+      if (!trigger_on_press) trigger_high_timestamp = timestamp;
       break;
     case PRESS:
-      Mouse.press(mouse_to_press);
+      action->press();
+      if (trigger_on_press) trigger_high_timestamp = timestamp;
       break;
     case NOOVERRIDE:
-    default:
       trigger->measure();
       if (trigger->state_changed()) {
         if (trigger->get_state() == trigger_on_press) {
-          Mouse.press(mouse_to_press);
+          action->press();
         }
         else if (trigger->get_state() != trigger_on_press) {
-          Mouse.release(mouse_to_press);
+          action->release();
         }
       }
       break;
+    default:
+      break;
+    }
+    update_trigger_override();
+  }
+  void check_for_commands() {
+    uint8_t command[4]{};
+    while (Serial.available() >= sizeof(command) && Serial.readBytes(command, sizeof(command)) == sizeof(command)) {
+      bool valid_command = false;
+      for (uint8_t i = 0; i < commands_count; i++) {
+        if (allowed_commands[i] == command[0]) {
+          valid_command = true;
+          break;
+        }
+      }
+      if (!valid_command || !valid_checksum(command, sizeof(command))) continue;
+      switch ((Command)command[0]) {
+
+      case SET_POLL_RATE:
+        set_rate(static_cast<unsigned>(command[2]) << 8 | static_cast<unsigned>(command[1]));
+      case GET_POLL_RATE:
+        command[1] = (1000000 / get_interval()) & 0xFF;
+        command[2] = (1000000 / get_interval()) >> 8 & 0xFF;
+        break;
+
+      case SET_REPORT_MODE:
+        if (command[1] > 3) break; // :D
+        mode = (ReportMode)command[1];
+      case GET_REPORT_MODE:
+        command[1] = mode;
+        break;
+
+      case SET_THRESHOLD:
+        threshold = static_cast<unsigned>(command[2]) << 8 | static_cast<unsigned>(command[1]);
+      case GET_THRESHOLD:
+        command[1] = threshold & 0xFF;
+        command[2] = threshold >> 8 & 0xFF;
+        break;
+
+      case SET_ACTION:
+        if (command[1] > 2) break; // :D
+        action->mode = (ActionMode)command[1];
+        action->button_to_press = command[2];  // check if key is valid for a given trigger
+      case GET_ACTION:
+        command[1] = action->mode;
+        command[2] = action->button_to_press;
+        break;
+
+      case MANUAL_TRIGGER:
+        manual_trigger();
+        break;
+
+      default:
+        break;
+      }
+
+      command[sizeof(command) - 1] = calc_checksum(command, sizeof(command) - 1);
+      Serial.write(command, sizeof(command));
     }
   }
+  void manual_trigger() {
+    trigger_override = PRESS;
+    trigger_override_count = 50 * 1000 / interval_us; // always 50ms, make configurable?
+  }
+  void set_rate(uint64_t rate) {
+    interval_us = 1000000 / rate;
+  }
+  const uint64_t get_interval() {
+    return interval_us;
+  }
   void report_raw() {
-    Serial.printf("%llu,%hu,%hhu\n", timestamp, sensor->get_brightness(), trigger->get_state());
+    write_report(Command::REPORT_RAW, timestamp, sensor->get_brightness(), (uint8_t)trigger->get_state());
   }
   void report_summary() {
     uint16_t threshold = calc_threshold(sensor->get_brightness());
-    if (trigger->state_changed() && trigger->get_state() == trigger_on_press) {
+    if (trigger_override == NOOVERRIDE && trigger->state_changed() && trigger->get_state() == trigger_on_press) {
       trigger_high_timestamp = timestamp;
     }
     else if (trigger_high_timestamp && sensor->get_brightness() > threshold) {
-      Serial.printf("%llu \t%hu\n", timestamp - trigger_high_timestamp, threshold);
+      write_report(Command::REPORT_SUMMARY, timestamp - trigger_high_timestamp, threshold, 1);
       trigger_high_timestamp = 0;
     }
   }
