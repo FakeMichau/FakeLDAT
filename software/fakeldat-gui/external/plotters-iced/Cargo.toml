@@ -1,0 +1,42 @@
+[package]
+name = "plotters-iced"
+version = "0.10.0"
+description = "Iced backend for Plotters"
+readme = "README.md"
+license = "MIT"
+edition = "2021"
+resolver = "2"
+homepage = "https://github.com/Joylei/plotters-iced"
+repository = "https://github.com/Joylei/plotters-iced.git"
+documentation = "https://docs.rs/crate/plotters-iced/"
+keywords = ["plotters", "chart", "plot", "iced", "backend"]
+categories = ["visualization"]
+authors = ["Joylei <leingliu@gmail.com>"]
+
+# [workspace]
+# members = [".", "examples/split-chart"]
+
+[dependencies]
+plotters = { version = "0.3", default_features = false }
+plotters-backend = "0.3"
+iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "3013463baa71504488a20436beb3db87ecb66df0", features = ["canvas"]}
+# iced_widget = { version = "0.12", features = ["canvas"] }
+iced_graphics = { git = "https://github.com/iced-rs/iced.git", rev = "3013463baa71504488a20436beb3db87ecb66df0"}
+# iced_graphics = "0.12"
+once_cell = "1"
+
+[dev-dependencies]
+plotters = { version = "0.3", default_features = false, features = [
+    "chrono",
+    "area_series",
+    "line_series",
+    "point_series",
+] }
+iced = { git = "https://github.com/iced-rs/iced.git", rev = "3013463baa71504488a20436beb3db87ecb66df0", features = ["canvas"]}
+# iced = { version = "0.12", features = ["canvas", "tokio"] }
+chrono = { version = "0.4", default-features = false }
+rand = "0.8"
+tokio = { version = "1", features = ["rt"], default-features = false }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+sysinfo = { version = "0.30", default_features = false }
