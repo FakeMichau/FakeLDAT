@@ -23,7 +23,7 @@ void loop() {
   if (m_device->mode == RAW || m_device->mode == COMBINED) {
     m_device->report_raw();
   }
-  else if (m_device->mode == SUMMARY || m_device->mode == COMBINED) {
+  if (m_device->mode == SUMMARY || m_device->mode == COMBINED) {
     m_device->report_summary();
   }
 
