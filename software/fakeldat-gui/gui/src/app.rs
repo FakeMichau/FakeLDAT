@@ -1,5 +1,12 @@
-use std::{cmp::Ordering, collections::VecDeque, time::Duration};
+use std::{
+    cmp::Ordering,
+    collections::VecDeque,
+    fs::{File, OpenOptions},
+    io::Write,
+    time::Duration,
+};
 
+use chrono::{DateTime, Utc};
 use fakeldat_lib::{serialport, ActionMode, FakeLDAT, RawReport, ReportMode, SummaryReport};
 use iced::{
     widget::{
@@ -15,6 +22,7 @@ use plotters::{
     style::{BLUE, RED, WHITE},
 };
 use plotters_iced::{Chart, ChartBuilder, ChartWidget, DrawingArea, DrawingBackend};
+use rfd::FileDialog;
 
 struct UI {
     fakeldat: FakeLDAT,
@@ -25,6 +33,7 @@ struct UI {
     selected_actionkey: Option<u8>,
     threshold: i16,
     show_graph: bool,
+    record_file: Option<File>,
     raw_data: VecDeque<RawReport>,    // data refactor?
     summary_data: Vec<SummaryReport>, // TODO: old data is not being removed
     trigger: Vec<u64>,                // TODO: old data is not being removed
@@ -47,6 +56,7 @@ impl Default for UI {
             selected_actionkey: Some(0),
             threshold: 150,
             show_graph: true,
+            record_file: None,
             raw_data: VecDeque::new(),
             summary_data: Vec::new(),
             trigger: Vec::new(),
@@ -169,12 +179,13 @@ impl Chart<Message> for UI {
 }
 
 impl UI {
-    #[allow(clippy::needless_pass_by_value)]
+    #[allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
     fn update(&mut self, message: Message) {
         match message {
             Message::Tick => {
                 self.fakeldat.poll_bulk_data();
                 if let Some(reports) = self.fakeldat.take_report_buffer() {
+                    let mut record_buffer = vec![];
                     for report in reports {
                         match report {
                             fakeldat_lib::Report::Raw(raw_report) => {
@@ -183,9 +194,19 @@ impl UI {
                                         self.trigger.push(raw_report.timestamp);
                                     }
                                 }
+                                record_buffer.push(format!(
+                                    "{},{},{}",
+                                    raw_report.brightness,
+                                    raw_report.timestamp,
+                                    u8::from(raw_report.trigger)
+                                ));
                                 self.push_data(raw_report);
                             }
                             fakeldat_lib::Report::Summary(summary_report) => {
+                                record_buffer.push(format!(
+                                    "{},{}",
+                                    summary_report.delay, summary_report.threshold
+                                ));
                                 self.summary_data.push(summary_report);
                             }
                             fakeldat_lib::Report::PollRate(pollrate) => {
@@ -203,6 +224,11 @@ impl UI {
                             }
                         }
                     }
+                    if let Some(ref mut record_file) = &mut self.record_file {
+                        let mut data = record_buffer.join("\n");
+                        data.push('\n');
+                        record_file.write_all(data.as_ref());
+                    }
                 }
 
                 // HACK: call for current settings while avoiding the buffer being cleared at the begining
@@ -216,7 +242,31 @@ impl UI {
                     self.fakeldat.get_report_mode();
                 }
             }
-            Message::Record => {}
+            Message::Record => {
+                let now: DateTime<Utc> = Utc::now();
+                let path =
+                    FileDialog::new()
+                        .set_directory("/")
+                        .pick_folder()
+                        .and_then(|record_dir| {
+                            self.selected_reportmode.map(|report_mode| {
+                                record_dir.join(format!(
+                                    "{}_report {}.csv",
+                                    report_mode.to_string().to_lowercase(),
+                                    now.format("%d-%m-%Y %H.%M.%S")
+                                ))
+                            })
+                        });
+                if let Some(path) = path {
+                    self.record_file = Some(
+                        OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(path)
+                            .unwrap(),
+                    );
+                }
+            }
             Message::Clear => {
                 self.raw_data = vec![].into();
                 self.summary_data = vec![];
@@ -253,7 +303,8 @@ impl UI {
             )
         } else if !self.show_graph {
             container(Space::new(Length::Fill, Length::Fill))
-        } else { // When showing the other graph
+        } else {
+            // When showing the other graph
             container(Space::new(Length::Shrink, Length::Shrink))
         };
         let graph_summary = if self.show_graph
@@ -279,7 +330,8 @@ impl UI {
             )
         } else if !self.show_graph {
             container(Space::new(Length::Fill, Length::Fill))
-        } else { // When showing the other graph
+        } else {
+            // When showing the other graph
             container(Space::new(Length::Shrink, Length::Shrink))
         };
 
