@@ -68,7 +68,8 @@ impl Default for UI {
 #[derive(Debug, Clone)]
 pub enum Message {
     Tick,
-    Record,
+    RecordStart,
+    RecordStop,
     Clear,
     GraphToggle,
     PollRateChanged(PollRate), // TODO: change to actually value from the device, can't call the device in view, data needs to be retrieved in update
@@ -196,8 +197,8 @@ impl UI {
                                 }
                                 record_buffer.push(format!(
                                     "{},{},{}",
-                                    raw_report.brightness,
                                     raw_report.timestamp,
+                                    raw_report.brightness,
                                     u8::from(raw_report.trigger)
                                 ));
                                 self.push_data(raw_report);
@@ -242,7 +243,7 @@ impl UI {
                     self.fakeldat.get_report_mode();
                 }
             }
-            Message::Record => {
+            Message::RecordStart => {
                 let now: DateTime<Utc> = Utc::now();
                 let path =
                     FileDialog::new()
@@ -267,6 +268,7 @@ impl UI {
                     );
                 }
             }
+            Message::RecordStop => self.record_file = None,
             Message::Clear => {
                 self.raw_data = vec![].into();
                 self.summary_data = vec![];
@@ -276,7 +278,10 @@ impl UI {
                 let pollrate = pollrate.to_string().parse::<u16>().unwrap_or(1000);
                 self.fakeldat.set_poll_rate(pollrate);
             }
-            Message::ReportModeChanged(report_mode) => self.fakeldat.set_report_mode(report_mode),
+            Message::ReportModeChanged(report_mode) => {
+                self.fakeldat.set_report_mode(report_mode);
+                self.record_file = None;
+            }
             Message::ActionModeChanged(action_mode) => {
                 self.selected_actionmode = Some(action_mode);
                 self.selected_actionkey = None;
@@ -340,7 +345,11 @@ impl UI {
             .width(iced::Length::Fill)
             .padding(10);
 
-        let record = container(button("Record").on_press(Message::Record)).padding(10);
+        let record = container(match self.record_file {
+            Some(_) => button("Stop recording").on_press(Message::RecordStop),
+            None => button("Record").on_press(Message::RecordStart),
+        })
+        .padding(10);
         let clear = container(button("Clear").on_press(Message::Clear)).padding(10);
         let toggle_graph =
             container(button("Toggle graph").on_press(Message::GraphToggle)).padding(10);
