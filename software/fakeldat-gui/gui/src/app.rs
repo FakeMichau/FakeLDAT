@@ -7,7 +7,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use fakeldat_lib::{serialport, ActionMode, FakeLDAT, RawReport, ReportMode, SummaryReport};
+use fakeldat_lib::{serialport, ActionMode, Error, FakeLDAT, RawReport, ReportMode, SummaryReport};
 use iced::{
     widget::{
         button, column, container, pick_list, radio, row, scrollable, slider, text, Container,
@@ -182,11 +182,33 @@ impl Chart<Message> for UI {
 }
 
 impl UI {
-    #[allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
+    #[allow(clippy::needless_pass_by_value)]
     fn update(&mut self, message: Message) {
+        if let Err(why) = self.update_with_error(message) {
+            match why {
+                Error::WrongChecksum(_, _, _) | Error::ReadTooLittleData => unreachable!(), // Those should be internal
+                Error::InvalidSetting(command, buf) => {
+                    eprintln!("Invalid setting for {command}: {:x} {:x}", buf[0], buf[1]);
+                }
+                Error::InvalidCommand(command_id) => eprintln!("Invalid command id: {command_id}"),
+                Error::Unimplemented(command, buf) => eprintln!(
+                    "Unimplemented command: {command}: {:x} {:x}",
+                    buf[0], buf[1]
+                ),
+                Error::PortFail(serialport_error) => {
+                    eprintln!("Port fail: {}", serialport_error.description);
+                }
+                Error::ReadFail => eprintln!("Failure reading from the port"),
+                Error::SendCommandFail => eprintln!("Issue with sending a command"),
+                Error::IOError(io_error) => eprintln!("Issue with saving a file: {io_error}"),
+            }
+        };
+    }
+    #[allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
+    fn update_with_error(&mut self, message: Message) -> Result<(), Error> {
         match message {
             Message::Tick => {
-                self.fakeldat.poll_bulk_data();
+                self.fakeldat.poll_bulk_data()?;
                 if let Some(reports) = self.fakeldat.take_report_buffer() {
                     let mut record_buffer = vec![];
                     for report in reports {
@@ -231,7 +253,9 @@ impl UI {
                     if let Some(ref mut record_file) = &mut self.record_file {
                         let mut data = record_buffer.join("\n");
                         data.push('\n');
-                        record_file.write_all(data.as_ref());
+                        record_file
+                            .write_all(data.as_ref())
+                            .map_err(Error::IOError)?;
                     }
                 }
 
@@ -240,10 +264,10 @@ impl UI {
                     self.init_process += 1;
                 }
                 if self.init_process == 10 {
-                    self.fakeldat.get_action();
-                    self.fakeldat.get_poll_rate();
-                    self.fakeldat.get_threshold();
-                    self.fakeldat.get_report_mode();
+                    self.fakeldat.get_action()?;
+                    self.fakeldat.get_poll_rate()?;
+                    self.fakeldat.get_threshold()?;
+                    self.fakeldat.get_report_mode()?;
                 }
             }
             Message::RecordStart => {
@@ -264,7 +288,7 @@ impl UI {
                             .create(true)
                             .append(true)
                             .open(path)
-                            .unwrap(),
+                            .map_err(Error::IOError)?,
                     );
                 }
             }
@@ -275,11 +299,10 @@ impl UI {
             }
             Message::GraphToggle => self.show_graph = !self.show_graph,
             Message::PollRateChanged(pollrate) => {
-                let pollrate = pollrate.to_string().parse::<u16>().unwrap_or(1000);
-                self.fakeldat.set_poll_rate(pollrate);
+                self.fakeldat.set_poll_rate(pollrate.into())?;
             }
             Message::ReportModeChanged(report_mode) => {
-                self.fakeldat.set_report_mode(report_mode);
+                self.fakeldat.set_report_mode(report_mode)?;
                 self.record_file = None;
             }
             Message::ActionModeChanged(action_mode) => {
@@ -287,11 +310,14 @@ impl UI {
                 self.selected_actionkey = None;
             }
             Message::ActionKeyChanged(key) => {
-                self.fakeldat.set_action(self.selected_actionmode, key);
+                self.fakeldat.set_action(self.selected_actionmode, key)?;
             }
             Message::ThresholdChanged(threshold) => self.threshold = threshold,
-            Message::ThresholdReleased => self.fakeldat.set_threshold(self.threshold),
+            Message::ThresholdReleased => {
+                self.fakeldat.set_threshold(self.threshold)?;
+            }
         }
+        Ok(())
     }
 
     #[allow(clippy::too_many_lines)]

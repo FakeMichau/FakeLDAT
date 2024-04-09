@@ -4,7 +4,9 @@ pub use serialport;
 use serialport::SerialPort;
 use std::io::Read;
 
-#[derive(Debug, Clone)]
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug)]
 pub enum Error {
     // command with the error, expected checksum, calculated checksum
     WrongChecksum(Command, u8, u8),
@@ -13,10 +15,12 @@ pub enum Error {
     // value of the command received
     InvalidCommand(u8),
     // value of the command and settings received
-    Unimplemented(u8, [u8; 2]),
-    PortFail,
+    Unimplemented(Command, [u8; 2]),
+    PortFail(serialport::Error),
     ReadFail,
     ReadTooLittleData,
+    SendCommandFail,
+    IOError(std::io::Error),
 }
 
 macro_rules! convert_enum {
@@ -31,7 +35,7 @@ macro_rules! convert_enum {
         impl std::convert::TryFrom<u8> for $name {
             type Error = ();
 
-            fn try_from(v: u8) -> Result<Self, Self::Error> {
+            fn try_from(v: u8) -> std::result::Result<Self, Self::Error> {
                 match v {
                     $(x if x == $name::$vname as u8 => Ok($name::$vname),)*
                     _ => Err(()),
@@ -60,11 +64,23 @@ convert_enum! {
 
 impl std::fmt::Display for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ReportRaw => write!(f, "Raw"),
-            Self::ReportSummary => write!(f, "Summary"),
-            _ => todo!(),
-        }
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::ReportRaw => "Raw",
+                Self::ReportSummary => "Summary",
+                Self::SetPollRate => "Set poll rate",
+                Self::GetPollRate => "Get poll rate",
+                Self::SetReportMode => "Set report mode",
+                Self::GetReportMode => "Get report mode",
+                Self::SetThreshold => "Set threshold",
+                Self::GetThreshold => "Get threshold",
+                Self::SetAction => "Set action",
+                Self::GetAction => "Get action",
+                Self::ManualTrigger => "Manual trigger",
+            }
+        )
     }
 }
 
@@ -139,14 +155,15 @@ pub struct FakeLDAT {
 }
 
 impl FakeLDAT {
-    pub fn create(mut port: Box<dyn SerialPort>) -> Result<Self, Error> {
+    pub fn create(mut port: Box<dyn SerialPort>) -> Result<Self> {
         // TODO: create port here given some unique characteristic
-        port.write_data_terminal_ready(true);
+        port.write_data_terminal_ready(true)
+            .map_err(Error::PortFail)?;
         Ok(Self {
             report_buffer: Some(Vec::new()),
             read_iter: port
                 .try_clone()
-                .map_err(|_| Error::PortFail)?
+                .map_err(Error::PortFail)?
                 .bytes()
                 .peekable(),
             port,
@@ -156,65 +173,56 @@ impl FakeLDAT {
         command: Command,
         args: [u8; 2],
         port: &mut T,
-    ) -> std::io::Result<()> {
+    ) -> Result<()> {
         let mut buf = [0; 4];
         buf[0] = command as u8;
         buf[1] = args[0];
         buf[2] = args[1];
         buf[3] = sum_slice(&buf[..3]);
-        port.write_all(&buf)
+        port.write_all(&buf).map_err(|_| Error::SendCommandFail)
     }
 
-    pub fn set_poll_rate(&mut self, pollrate_hz: u16) {
+    pub fn set_poll_rate(&mut self, pollrate_hz: u16) -> Result<()> {
         Self::send_command(
             Command::SetPollRate,
             pollrate_hz.to_le_bytes(),
             &mut self.port,
         )
-        .expect("Set Poll Rate");
     }
-    pub fn set_threshold(&mut self, threshold: i16) {
+    pub fn set_threshold(&mut self, threshold: i16) -> Result<()> {
         Self::send_command(
             Command::SetThreshold,
             threshold.to_le_bytes(),
             &mut self.port,
         )
-        .expect("Set Threshold");
     }
-    pub fn set_report_mode(&mut self, report_mode: ReportMode) {
+    pub fn set_report_mode(&mut self, report_mode: ReportMode) -> Result<()> {
         Self::send_command(
             Command::SetReportMode,
             [report_mode as u8, 0],
             &mut self.port,
         )
-        .expect("Set Report Mode");
     }
-    pub fn set_action(&mut self, action_mode: ActionMode, key: u8) {
-        Self::send_command(
-            Command::SetAction,
-            [action_mode as u8, key],
-            &mut self.port,
-        )
-        .expect("Set Action");
+    pub fn set_action(&mut self, action_mode: ActionMode, key: u8) -> Result<()> {
+        Self::send_command(Command::SetAction, [action_mode as u8, key], &mut self.port)
     }
 
-    pub fn get_poll_rate(&mut self) {
-        Self::send_command(Command::GetPollRate, [0, 0], &mut self.port).expect("Get Poll Rate");
+    pub fn get_poll_rate(&mut self) -> Result<()> {
+        Self::send_command(Command::GetPollRate, [0, 0], &mut self.port)
     }
-    pub fn get_threshold(&mut self) {
-        Self::send_command(Command::GetThreshold, [0, 0], &mut self.port).expect("Get Threshold");
+    pub fn get_threshold(&mut self) -> Result<()> {
+        Self::send_command(Command::GetThreshold, [0, 0], &mut self.port)
     }
-    pub fn get_report_mode(&mut self) {
+    pub fn get_report_mode(&mut self) -> Result<()> {
         Self::send_command(Command::GetReportMode, [0, 0], &mut self.port)
-            .expect("Get Report Mode");
     }
-    pub fn get_action(&mut self) {
-        Self::send_command(Command::GetAction, [0, 0], &mut self.port).expect("Get Action");
+    pub fn get_action(&mut self) -> Result<()> {
+        Self::send_command(Command::GetAction, [0, 0], &mut self.port)
     }
 
     #[allow(clippy::too_many_lines)]
     // This will block
-    fn poll_data(&mut self) -> Result<Report, Error> {
+    fn poll_data(&mut self) -> Result<Report> {
         let mut command_buffer = [0u8; 1];
         if self.port.bytes_to_read().unwrap() == 0 {
             // needed because otherwise peek will block
@@ -223,7 +231,8 @@ impl FakeLDAT {
         if let Some(command_peek) = self.read_iter.peek() {
             let command = command_peek.as_ref().expect("Command peek");
             // 12 and 3 instead of 13 and 4 because peek reads one byte
-            if command == &(Command::ReportRaw as u8) || command == &(Command::ReportSummary as u8) {
+            if command == &(Command::ReportRaw as u8) || command == &(Command::ReportSummary as u8)
+            {
                 if self.port.bytes_to_read().unwrap_or_default() < 12 {
                     return Err(Error::ReadTooLittleData);
                 }
@@ -245,8 +254,8 @@ impl FakeLDAT {
         // Reports are 13 bytes, settings are 4 bytes
         if command == Command::ReportRaw || command == Command::ReportSummary {
             let mut buf = [0u8; 12];
-            for i in 0..12 {
-                buf[i] = self
+            for item in &mut buf {
+                *item = self
                     .read_iter
                     .next()
                     .expect("Data")
@@ -274,8 +283,8 @@ impl FakeLDAT {
         } else {
             let mut settings_buffer = [0u8; 2];
             let mut checksum_buffer = [0u8; 1];
-            for i in 0..2 {
-                settings_buffer[i] = self
+            for item in &mut settings_buffer {
+                *item = self
                     .read_iter
                     .next()
                     .expect("Data")
@@ -314,7 +323,7 @@ impl FakeLDAT {
                     };
                     Ok(Report::Action(action_mode, settings_buffer[1]))
                 }
-                _ => Err(Error::Unimplemented(command as u8, settings_buffer)),
+                _ => Err(Error::Unimplemented(command, settings_buffer)),
             }
         }
     }
@@ -327,7 +336,7 @@ impl FakeLDAT {
         }
     }
 
-    pub fn poll_bulk_data(&mut self) {
+    pub fn poll_bulk_data(&mut self) -> Result<()> {
         // TODO: what if serial buffer gets full in the meantime
         let mut read_next = true;
         while read_next {
@@ -343,11 +352,14 @@ impl FakeLDAT {
                     Error::ReadTooLittleData => read_next = false,
                     Error::WrongChecksum(a, b, c) => {
                         println!("Wrong checksum: {a}, {b}, {c}");
-                        self.port.clear(serialport::ClearBuffer::Input);
+                        self.port
+                            .clear(serialport::ClearBuffer::Input)
+                            .map_err(Error::PortFail)?;
                     }
-                    _ => todo!(),
+                    why => return Result::Err(why),
                 },
             }
         }
+        Ok(())
     }
 }
