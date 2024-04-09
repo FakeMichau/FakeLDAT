@@ -198,7 +198,6 @@ impl UI {
                 Error::PortFail(serialport_error) => {
                     eprintln!("Port fail: {}", serialport_error.description);
                 }
-                Error::ReadFail => eprintln!("Failure reading from the port"),
                 Error::SendCommandFail => eprintln!("Issue with sending a command"),
                 Error::IOError(io_error) => eprintln!("Issue with saving a file: {io_error}"),
             }

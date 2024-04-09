@@ -17,10 +17,22 @@ pub enum Error {
     // value of the command and settings received
     Unimplemented(Command, [u8; 2]),
     PortFail(serialport::Error),
-    ReadFail,
     ReadTooLittleData,
     SendCommandFail,
     IOError(std::io::Error),
+}
+
+impl From<serialport::Error> for Error {
+    fn from(value: serialport::Error) -> Self {
+        Self::PortFail(value)
+    }
+}
+
+
+impl From<std::io::Error> for Error {
+    fn from(value: std::io::Error) -> Self {
+        Self::IOError(value)
+    }
 }
 
 macro_rules! convert_enum {
@@ -157,13 +169,11 @@ pub struct FakeLDAT {
 impl FakeLDAT {
     pub fn create(mut port: Box<dyn SerialPort>) -> Result<Self> {
         // TODO: create port here given some unique characteristic
-        port.write_data_terminal_ready(true)
-            .map_err(Error::PortFail)?;
+        port.write_data_terminal_ready(true)?;
         Ok(Self {
             report_buffer: Some(Vec::new()),
             read_iter: port
-                .try_clone()
-                .map_err(Error::PortFail)?
+                .try_clone()?
                 .bytes()
                 .peekable(),
             port,
@@ -224,7 +234,7 @@ impl FakeLDAT {
     // This will block
     fn poll_data(&mut self) -> Result<Report> {
         let mut command_buffer = [0u8; 1];
-        if self.port.bytes_to_read().unwrap() == 0 {
+        if self.port.bytes_to_read()? == 0 {
             // needed because otherwise peek will block
             return Err(Error::ReadTooLittleData);
         }
@@ -245,8 +255,7 @@ impl FakeLDAT {
         command_buffer[0] = self
             .read_iter
             .next()
-            .expect("Command")
-            .map_err(|_| Error::ReadFail)?;
+            .expect("Command")?;
         let Ok(command) = command_buffer[0].try_into() else {
             return Err(Error::InvalidCommand(command_buffer[0]));
         };
@@ -258,8 +267,7 @@ impl FakeLDAT {
                 *item = self
                     .read_iter
                     .next()
-                    .expect("Data")
-                    .map_err(|_| Error::ReadFail)?;
+                    .expect("Data")?;
             }
             let calculated_checksum: u8 = sum_slice(&buf[..=10]).wrapping_add(command_buffer[0]);
             if buf[11] == calculated_checksum {
@@ -287,14 +295,12 @@ impl FakeLDAT {
                 *item = self
                     .read_iter
                     .next()
-                    .expect("Data")
-                    .map_err(|_| Error::ReadFail)?;
+                    .expect("Data")?;
             }
             checksum_buffer[0] = self
                 .read_iter
                 .next()
-                .expect("Data")
-                .map_err(|_| Error::ReadFail)?;
+                .expect("Data")?;
             let calculated_checksum: u8 =
                 sum_slice(&[command_buffer[0], settings_buffer[0], settings_buffer[1]]);
             if checksum_buffer[0] != calculated_checksum {
@@ -353,8 +359,7 @@ impl FakeLDAT {
                     Error::WrongChecksum(a, b, c) => {
                         println!("Wrong checksum: {a}, {b}, {c}");
                         self.port
-                            .clear(serialport::ClearBuffer::Input)
-                            .map_err(Error::PortFail)?;
+                            .clear(serialport::ClearBuffer::Input)?;
                     }
                     why => return Result::Err(why),
                 },
