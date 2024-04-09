@@ -148,7 +148,6 @@ impl Chart<Message> for UI {
         self.build_chart(state, builder);
     }
     fn build_chart<DB: DrawingBackend>(&self, _state: &Self::State, mut builder: ChartBuilder<DB>) {
-        // return; Drawing the chart is slow at >1000Hz
         let min = self
             .raw_data
             .iter()
@@ -158,26 +157,35 @@ impl Chart<Message> for UI {
             .iter()
             .fold(std::u64::MIN, |a, b| a.max(b.timestamp));
         let mut chart = builder
-            .build_cartesian_2d(min as f64..max as f64, 0.0..4096.0)
+            .set_all_label_area_size(45)
+            .top_x_label_area_size(20)
+            .x_label_area_size(20)
+            .build_cartesian_2d(min..max, 0u64..4096)
             .unwrap();
         let nice = self
             .raw_data
             .iter()
-            .map(|report| (report.timestamp as f64, f64::from(report.brightness)));
-        chart.draw_series(LineSeries::new(nice, &BLUE));
-        chart.configure_mesh().disable_mesh().draw();
-        chart.draw_series(self.trigger.iter().filter_map(|trigger| {
-            if *trigger > min {
-                Some(Rectangle::new(
-                    [(*trigger as f64, 4095.0), (*trigger as f64, 0.0)],
-                    RED,
-                ))
-            } else {
-                None
-            }
-        }));
+            .map(|report| (report.timestamp, report.brightness.into()));
+        chart
+            .draw_series(LineSeries::new(nice, &BLUE))
+            .expect("Draw brightness line");
+        chart
+            .configure_mesh()
+            .disable_mesh()
+            .disable_x_axis()
+            .y_label_formatter(&ToString::to_string)
+            .draw()
+            .expect("Draw mesh");
+        chart
+            .draw_series(self.trigger.iter().filter_map(|trigger| {
+                if *trigger > min {
+                    Some(Rectangle::new([(*trigger, 4095), (*trigger, 0)], RED))
+                } else {
+                    None
+                }
+            }))
+            .expect("Draw triggers");
         // TODO: visualize the threshold
-        //build your chart here, please refer to plotters for more details
     }
 }
 
