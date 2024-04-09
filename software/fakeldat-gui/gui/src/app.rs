@@ -103,21 +103,23 @@ impl PollRate {
     ];
 }
 
+impl From<PollRate> for u64 {
+    fn from(val: PollRate) -> Self {
+        match val {
+            PollRate::_500 => 500,
+            PollRate::_1000 => 1000,
+            PollRate::_2000 => 2000,
+            PollRate::_4000 => 4000,
+            PollRate::_8000 => 8000,
+            PollRate::_16000 => 16000,
+            PollRate::_32000 => 32000,
+        }
+    }
+}
+
 impl std::fmt::Display for PollRate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Self::_500 => 500,
-                Self::_1000 => 1000,
-                Self::_2000 => 2000,
-                Self::_4000 => 4000,
-                Self::_8000 => 8000,
-                Self::_16000 => 16000,
-                Self::_32000 => 32000,
-            }
-        )
+        write!(f, "{}", std::convert::Into::<u64>::into(*self))
     }
 }
 
@@ -233,10 +235,10 @@ impl UI {
                 }
 
                 // HACK: call for current settings while avoiding the buffer being cleared at the begining
-                if self.init_process <= 50 {
+                if self.init_process <= 10 {
                     self.init_process += 1;
                 }
-                if self.init_process == 50 {
+                if self.init_process == 10 {
                     self.fakeldat.get_action();
                     self.fakeldat.get_poll_rate();
                     self.fakeldat.get_threshold();
@@ -488,8 +490,18 @@ impl UI {
     #[allow(clippy::unused_self)]
     // just for polling fakeldat
     fn subscription(&self) -> Subscription<Message> {
-        const HERTZ: u64 = 40;
-        iced::time::every(Duration::from_micros(1_000_000 / HERTZ)).map(|_| Message::Tick)
+        // for raw it needs to be at least (pollrate/256)
+        let hertz = self
+            .selected_reportmode
+            .and_then(|report_mode| match report_mode {
+                ReportMode::Raw | ReportMode::Combined => self
+                    .selected_pollrate
+                    .map(|pollrate| std::convert::Into::<u64>::into(pollrate) / 200),
+                ReportMode::Summary => Some(10),
+            })
+            .unwrap_or(10)
+            .clamp(10, u64::MAX);
+        iced::time::every(Duration::from_micros(1_000_000 / hertz)).map(|_| Message::Tick)
     }
 
     fn push_data(&mut self, data: RawReport) {
