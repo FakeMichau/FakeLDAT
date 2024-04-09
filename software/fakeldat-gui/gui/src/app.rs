@@ -27,9 +27,9 @@ use rfd::FileDialog;
 struct UI {
     fakeldat: FakeLDAT,
     theme: Theme,
-    selected_pollrate: Option<PollRate>,
-    selected_reportmode: Option<ReportMode>,
-    selected_actionmode: Option<ActionMode>,
+    selected_pollrate: PollRate,
+    selected_reportmode: ReportMode,
+    selected_actionmode: ActionMode,
     selected_actionkey: Option<u8>,
     threshold: i16,
     show_graph: bool,
@@ -50,10 +50,10 @@ impl Default for UI {
         Self {
             fakeldat: FakeLDAT::create(port).expect("Couldn't create FakeLDAT"),
             theme: Theme::Dark,
-            selected_pollrate: Some(PollRate::_2000),
-            selected_reportmode: Some(ReportMode::Raw),
-            selected_actionmode: Some(ActionMode::Mouse),
-            selected_actionkey: Some(0),
+            selected_pollrate: PollRate::_2000,
+            selected_reportmode: ReportMode::Raw,
+            selected_actionmode: ActionMode::Mouse,
+            selected_actionkey: Some(1), // LMB
             threshold: 150,
             show_graph: true,
             record_file: None,
@@ -103,7 +103,7 @@ impl PollRate {
     ];
 }
 
-impl From<PollRate> for u64 {
+impl From<PollRate> for u16 {
     fn from(val: PollRate) -> Self {
         match val {
             PollRate::_500 => 500,
@@ -119,7 +119,7 @@ impl From<PollRate> for u64 {
 
 impl std::fmt::Display for PollRate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", std::convert::Into::<u64>::into(*self))
+        write!(f, "{}", std::convert::Into::<u16>::into(*self))
     }
 }
 
@@ -213,14 +213,15 @@ impl UI {
                                 self.summary_data.push(summary_report);
                             }
                             fakeldat_lib::Report::PollRate(pollrate) => {
-                                self.selected_pollrate = pollrate.try_into().ok();
+                                self.selected_pollrate =
+                                    pollrate.try_into().expect("Wrong poll rate");
                             }
                             fakeldat_lib::Report::Action(action_mode, key) => {
-                                self.selected_actionmode = Some(action_mode);
+                                self.selected_actionmode = action_mode;
                                 self.selected_actionkey = Some(key);
                             }
                             fakeldat_lib::Report::ReportMode(report_mode) => {
-                                self.selected_reportmode = Some(report_mode);
+                                self.selected_reportmode = report_mode;
                             }
                             fakeldat_lib::Report::Threshold(threshold) => {
                                 self.threshold = threshold;
@@ -247,19 +248,16 @@ impl UI {
             }
             Message::RecordStart => {
                 let now: DateTime<Utc> = Utc::now();
-                let path =
-                    FileDialog::new()
-                        .set_directory("/")
-                        .pick_folder()
-                        .and_then(|record_dir| {
-                            self.selected_reportmode.map(|report_mode| {
-                                record_dir.join(format!(
-                                    "{}_report {}.csv",
-                                    report_mode.to_string().to_lowercase(),
-                                    now.format("%d-%m-%Y %H.%M.%S")
-                                ))
-                            })
-                        });
+                let path = FileDialog::new()
+                    .set_directory("/")
+                    .pick_folder()
+                    .map(|record_dir| {
+                        record_dir.join(format!(
+                            "{}_report {}.csv",
+                            self.selected_reportmode.to_string().to_lowercase(),
+                            now.format("%d-%m-%Y %H.%M.%S")
+                        ))
+                    });
                 if let Some(path) = path {
                     self.record_file = Some(
                         OpenOptions::new()
@@ -285,12 +283,11 @@ impl UI {
                 self.record_file = None;
             }
             Message::ActionModeChanged(action_mode) => {
-                self.selected_actionmode = Some(action_mode);
+                self.selected_actionmode = action_mode;
                 self.selected_actionkey = None;
             }
             Message::ActionKeyChanged(key) => {
-                self.fakeldat
-                    .set_action(self.selected_actionmode.unwrap(), key);
+                self.fakeldat.set_action(self.selected_actionmode, key);
             }
             Message::ThresholdChanged(threshold) => self.threshold = threshold,
             Message::ThresholdReleased => self.fakeldat.set_threshold(self.threshold),
@@ -300,8 +297,8 @@ impl UI {
     #[allow(clippy::too_many_lines)]
     fn view(&self) -> iced::Element<Message> {
         let graph_raw = if self.show_graph
-            && (self.selected_reportmode.unwrap() == ReportMode::Raw
-                || self.selected_reportmode.unwrap() == ReportMode::Combined)
+            && (self.selected_reportmode == ReportMode::Raw
+                || self.selected_reportmode == ReportMode::Combined)
         {
             container(
                 ChartWidget::new(self)
@@ -315,8 +312,8 @@ impl UI {
             container(Space::new(Length::Shrink, Length::Shrink))
         };
         let graph_summary = if self.show_graph
-            && (self.selected_reportmode.unwrap() == ReportMode::Summary
-                || self.selected_reportmode.unwrap() == ReportMode::Combined)
+            && (self.selected_reportmode == ReportMode::Summary
+                || self.selected_reportmode == ReportMode::Combined)
         {
             container(
                 Scrollable::with_direction(
@@ -365,7 +362,7 @@ impl UI {
         let poll_rate_text = text("Poll rate");
         let poll_rate_options: Container<'_, Message> = container(pick_list(
             &PollRate::ALL[..],
-            self.selected_pollrate,
+            Some(self.selected_pollrate),
             Message::PollRateChanged,
         ));
         let poll_rate = container(
@@ -382,19 +379,19 @@ impl UI {
             radio(
                 ReportMode::Raw.to_string(),
                 ReportMode::Raw,
-                self.selected_reportmode,
+                Some(self.selected_reportmode),
                 Message::ReportModeChanged
             ),
             radio(
                 ReportMode::Summary.to_string(),
                 ReportMode::Summary,
-                self.selected_reportmode,
+                Some(self.selected_reportmode),
                 Message::ReportModeChanged
             ),
             radio(
                 ReportMode::Combined.to_string(),
                 ReportMode::Combined,
-                self.selected_reportmode,
+                Some(self.selected_reportmode),
                 Message::ReportModeChanged
             )
         ]
@@ -413,13 +410,13 @@ impl UI {
             radio(
                 ActionMode::Mouse.to_string(),
                 ActionMode::Mouse,
-                self.selected_actionmode,
+                Some(self.selected_actionmode),
                 Message::ActionModeChanged
             ),
             radio(
                 ActionMode::Keyboard.to_string(),
                 ActionMode::Keyboard,
-                self.selected_actionmode,
+                Some(self.selected_actionmode),
                 Message::ActionModeChanged
             ),
         ]
@@ -430,7 +427,7 @@ impl UI {
                 action_mode_options,
                 pick_list(
                     // TODO: convert them into chars and "LMB, RMB" respectively
-                    match self.selected_actionmode.expect("Selected Action mode") {
+                    match self.selected_actionmode {
                         ActionMode::Mouse => vec![0, 1, 2],
                         ActionMode::Keyboard => (97..=122).collect(),
                     },
@@ -491,28 +488,20 @@ impl UI {
     // just for polling fakeldat
     fn subscription(&self) -> Subscription<Message> {
         // for raw it needs to be at least (pollrate/256)
-        let hertz = self
-            .selected_reportmode
-            .and_then(|report_mode| match report_mode {
-                ReportMode::Raw | ReportMode::Combined => self
-                    .selected_pollrate
-                    .map(|pollrate| std::convert::Into::<u64>::into(pollrate) / 200),
-                ReportMode::Summary => Some(10),
-            })
-            .unwrap_or(10)
-            .clamp(10, u64::MAX);
-        iced::time::every(Duration::from_micros(1_000_000 / hertz)).map(|_| Message::Tick)
+        let hertz = match self.selected_reportmode {
+            ReportMode::Raw | ReportMode::Combined => {
+                std::convert::Into::<u16>::into(self.selected_pollrate) / 200
+            }
+            ReportMode::Summary => 10,
+        }
+        .clamp(10, u16::MAX);
+        iced::time::every(Duration::from_micros(1_000_000 / u64::from(hertz)))
+            .map(|_| Message::Tick)
     }
 
     fn push_data(&mut self, data: RawReport) {
         // 4 seconds of data
-        let sample_count = self
-            .selected_pollrate
-            .unwrap()
-            .to_string()
-            .parse::<usize>()
-            .unwrap_or_default()
-            * 4;
+        let sample_count = std::convert::Into::<u16>::into(self.selected_pollrate) as usize * 4;
         match self.raw_data.len().cmp(&sample_count) {
             Ordering::Less => {}
             Ordering::Equal => _ = self.raw_data.pop_front(),
