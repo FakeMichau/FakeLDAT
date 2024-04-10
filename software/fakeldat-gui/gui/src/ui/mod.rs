@@ -176,6 +176,9 @@ impl UI {
     // Only for polling data, window refresh is separate
     fn tick(&mut self) -> Result<(), Error> {
         self.fakeldat.poll_bulk_data()?;
+        if self.init_process < 10 {
+            _=self.fakeldat.take_report_buffer();
+        }
         if let Some(reports) = self.fakeldat.take_report_buffer() {
             let mut record_buffer = vec![];
             for report in reports {
