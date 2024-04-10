@@ -1,33 +1,29 @@
-use std::{
-    cmp::Ordering,
-    collections::VecDeque,
-    fs::{File, OpenOptions},
-    io::Write,
-    time::Duration,
-};
-
+mod enums;
 use chrono::{DateTime, Utc};
+#[allow(clippy::wildcard_imports)]
+use enums::*;
 use fakeldat_lib::{
-    serialport, ActionMode, Error, FakeLDAT, KeyboardKey, MouseButton, RawReport, ReportMode,
-    SummaryReport,
+    serialport, ActionMode, Error, FakeLDAT, KeyboardKey, MouseButton, RawReport, Report,
+    ReportMode, SummaryReport,
 };
-use iced::{
-    widget::{
-        button, column, container, pick_list, radio, row, scrollable, slider, text, Container,
-        Rule, Scrollable, Space,
-    },
-    Alignment, Length, Subscription, Theme,
+use iced::widget::{
+    button, column, container, pick_list, radio, row, scrollable, slider, text, Container, Rule,
+    Scrollable, Space,
 };
-use plotters::{
-    coord::Shift,
-    element::Rectangle,
-    series::LineSeries,
-    style::{Color, BLUE, RED, WHITE},
-};
+use iced::{Alignment, Length, Subscription, Theme};
+use plotters::coord::Shift;
+use plotters::element::Rectangle;
+use plotters::series::LineSeries;
+use plotters::style::{Color, BLUE, RED, WHITE};
 use plotters_iced::{Chart, ChartBuilder, ChartWidget, DrawingArea, DrawingBackend};
 use rfd::FileDialog;
+use std::cmp::Ordering;
+use std::collections::VecDeque;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
+use std::time::Duration;
 
-struct UI {
+pub struct UI {
     fakeldat: FakeLDAT,
     theme: Theme,
     selected_pollrate: PollRate,
@@ -41,12 +37,6 @@ struct UI {
     summary_data: Vec<SummaryReport>, // TODO: old data is not being removed
     trigger: Vec<u64>,                // TODO: old data is not being removed
     init_process: u8,
-}
-
-#[derive(Default)]
-struct ActionKey {
-    mouse: Option<MouseButton>,
-    keyboard: Option<KeyboardKey>,
 }
 
 impl Default for UI {
@@ -74,150 +64,9 @@ impl Default for UI {
     }
 }
 
-#[derive(Debug, Clone)]
-enum Message {
-    Tick,
-    RecordStart,
-    RecordStop,
-    Clear,
-    GraphToggle,
-    PollRateChanged(PollRate), // TODO: change to actually value from the device, can't call the device in view, data needs to be retrieved in update
-    ReportModeChanged(ReportMode),
-    ActionModeChanged(ActionType),
-    ActionKeyChanged(u8),
-    ThresholdChanged(i16),
-    ThresholdReleased,
-}
-
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ActionType {
-    Mouse,
-    Keyboard,
-}
-
-impl std::fmt::Display for ActionType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Mouse => write!(f, "Mouse"),
-            Self::Keyboard => write!(f, "Keyboard"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PollRate {
-    _500,
-    _1000,
-    _2000,
-    _4000,
-    _8000,
-    _16000,
-    _32000,
-}
-
-impl PollRate {
-    const ALL: [Self; 7] = [
-        Self::_500,
-        Self::_1000,
-        Self::_2000,
-        Self::_4000,
-        Self::_8000,
-        Self::_16000,
-        Self::_32000,
-    ];
-}
-
-impl From<PollRate> for u16 {
-    fn from(val: PollRate) -> Self {
-        match val {
-            PollRate::_500 => 500,
-            PollRate::_1000 => 1000,
-            PollRate::_2000 => 2000,
-            PollRate::_4000 => 4000,
-            PollRate::_8000 => 8000,
-            PollRate::_16000 => 16000,
-            PollRate::_32000 => 32000,
-        }
-    }
-}
-
-impl std::fmt::Display for PollRate {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", std::convert::Into::<u16>::into(*self))
-    }
-}
-
-impl TryFrom<u16> for PollRate {
-    type Error = ();
-
-    fn try_from(value: u16) -> Result<Self, Self::Error> {
-        match value {
-            500 => Ok(Self::_500),
-            1000 => Ok(Self::_1000),
-            2000 => Ok(Self::_2000),
-            4000 => Ok(Self::_4000),
-            x if x > 7750 && x < 8250 => Ok(Self::_8000),
-            x if x > 15500 && x < 16500 => Ok(Self::_16000),
-            x if x > 31000 && x < 33000 => Ok(Self::_32000),
-            _ => Err(()),
-        }
-    }
-}
-
-impl Chart<Message> for UI {
-    type State = ();
-    fn draw_chart<DB: DrawingBackend>(&self, state: &Self::State, root: DrawingArea<DB, Shift>) {
-        _ = root.fill(&WHITE);
-        let builder = ChartBuilder::on(&root);
-        self.build_chart(state, builder);
-    }
-    fn build_chart<DB: DrawingBackend>(&self, _state: &Self::State, mut builder: ChartBuilder<DB>) {
-        let min = self
-            .raw_data
-            .iter()
-            .fold(std::u64::MAX, |a, b| a.min(b.timestamp));
-        let max = self
-            .raw_data
-            .iter()
-            .fold(std::u64::MIN, |a, b| a.max(b.timestamp));
-        let mut chart = builder
-            .set_all_label_area_size(45)
-            .top_x_label_area_size(20)
-            .x_label_area_size(20)
-            .build_cartesian_2d(min..max, 0u64..4096)
-            .unwrap();
-        chart
-            .draw_series(LineSeries::new(
-                self.raw_data
-                    .iter()
-                    .map(|report| (report.timestamp, report.brightness.into())),
-                BLUE.stroke_width(2),
-            ))
-            .expect("Draw brightness line");
-        chart
-            .configure_mesh()
-            .disable_mesh()
-            .disable_x_axis()
-            .y_label_formatter(&ToString::to_string)
-            .draw()
-            .expect("Draw mesh");
-        chart
-            .draw_series(self.trigger.iter().filter_map(|trigger| {
-                if *trigger > min {
-                    Some(Rectangle::new([(*trigger, 4095), (*trigger, 0)], RED))
-                } else {
-                    None
-                }
-            }))
-            .expect("Draw triggers");
-        // TODO: visualize the threshold
-    }
-}
-
 impl UI {
     #[allow(clippy::needless_pass_by_value)]
-    fn update(&mut self, message: Message) {
+    pub fn update(&mut self, message: Message) {
         if let Err(why) = self.update_with_error(message) {
             match why {
                 Error::WrongChecksum(_, _, _) | Error::ReadTooLittleData => unreachable!(), // Those should be internal
@@ -234,81 +83,37 @@ impl UI {
                 }
                 Error::SendCommandFail => eprintln!("Issue with sending a command"),
                 Error::IOError(io_error) => eprintln!("Issue with saving a file: {io_error}"),
-                Error::InvalidEnumConverion => eprintln!("TryFrom enum conversion error")
+                Error::InvalidEnumConverion => eprintln!("TryFrom enum conversion error"),
             }
         };
     }
-    #[allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
+
+    pub fn view(&self) -> iced::Element<Message> {
+        let spacer = Rule::horizontal(1);
+        let main_stack = column![
+            self.draw_graph(),
+            self.draw_buttons(),
+            spacer,
+            self.draw_rate_selection(),
+            self.draw_mode_selection(),
+            self.draw_action_selection(),
+            self.threshold_selection(),
+        ];
+
+        container(main_stack)
+            .center_x()
+            .center_y()
+            .padding(20)
+            .width(iced::Length::Fill)
+            .height(iced::Length::Fill)
+            .into()
+    }
+    
+    #[allow(clippy::needless_pass_by_value)]
     fn update_with_error(&mut self, message: Message) -> Result<(), Error> {
         match message {
             Message::Tick => {
-                self.fakeldat.poll_bulk_data()?;
-                if let Some(reports) = self.fakeldat.take_report_buffer() {
-                    let mut record_buffer = vec![];
-                    for report in reports {
-                        match report {
-                            fakeldat_lib::Report::Raw(raw_report) => {
-                                if let Some(last_record) = self.raw_data.back() {
-                                    if !last_record.trigger && raw_report.trigger {
-                                        self.trigger.push(raw_report.timestamp);
-                                    }
-                                }
-                                record_buffer.push(format!(
-                                    "{},{},{}",
-                                    raw_report.timestamp,
-                                    raw_report.brightness,
-                                    u8::from(raw_report.trigger)
-                                ));
-                                self.push_data(raw_report);
-                            }
-                            fakeldat_lib::Report::Summary(summary_report) => {
-                                record_buffer.push(format!(
-                                    "{},{}",
-                                    summary_report.delay, summary_report.threshold
-                                ));
-                                self.summary_data.push(summary_report);
-                            }
-                            fakeldat_lib::Report::PollRate(pollrate) => {
-                                self.selected_pollrate =
-                                    pollrate.try_into().expect("Wrong poll rate");
-                            }
-                            fakeldat_lib::Report::Action(action_mode) => match action_mode {
-                                ActionMode::Mouse(button) => {
-                                    self.selected_action_type = ActionType::Mouse;
-                                    self.selected_action_key.mouse = Some(button);
-                                }
-                                ActionMode::Keyboard(keyboard_key) => {
-                                    self.selected_action_type = ActionType::Keyboard;
-                                    self.selected_action_key.keyboard = Some(keyboard_key);
-                                }
-                            },
-                            fakeldat_lib::Report::ReportMode(report_mode) => {
-                                self.selected_reportmode = report_mode;
-                            }
-                            fakeldat_lib::Report::Threshold(threshold) => {
-                                self.threshold = threshold;
-                            }
-                        }
-                    }
-                    if let Some(ref mut record_file) = &mut self.record_file {
-                        let mut data = record_buffer.join("\n");
-                        data.push('\n');
-                        record_file
-                            .write_all(data.as_ref())
-                            .map_err(Error::IOError)?;
-                    }
-                }
-
-                // HACK: call for current settings while avoiding the buffer being cleared at the begining
-                if self.init_process <= 10 {
-                    self.init_process += 1;
-                }
-                if self.init_process == 10 {
-                    self.fakeldat.get_action()?;
-                    self.fakeldat.get_poll_rate()?;
-                    self.fakeldat.get_threshold()?;
-                    self.fakeldat.get_report_mode()?;
-                }
+                self.tick()?;
             }
             Message::RecordStart => {
                 let now: DateTime<Utc> = Utc::now();
@@ -368,8 +173,76 @@ impl UI {
         Ok(())
     }
 
-    #[allow(clippy::too_many_lines)]
-    fn view(&self) -> iced::Element<Message> {
+    // Only for polling data, window refresh is separate
+    fn tick(&mut self) -> Result<(), Error> {
+        self.fakeldat.poll_bulk_data()?;
+        if let Some(reports) = self.fakeldat.take_report_buffer() {
+            let mut record_buffer = vec![];
+            for report in reports {
+                match report {
+                    Report::Raw(raw_report) => {
+                        if let Some(last_record) = self.raw_data.back() {
+                            if !last_record.trigger && raw_report.trigger {
+                                self.trigger.push(raw_report.timestamp);
+                            }
+                        }
+                        record_buffer.push(format!(
+                            "{},{},{}",
+                            raw_report.timestamp,
+                            raw_report.brightness,
+                            u8::from(raw_report.trigger)
+                        ));
+                        self.push_data(raw_report);
+                    }
+                    Report::Summary(summary_report) => {
+                        record_buffer.push(format!(
+                            "{},{}",
+                            summary_report.delay, summary_report.threshold
+                        ));
+                        self.summary_data.push(summary_report);
+                    }
+                    Report::PollRate(pollrate) => {
+                        self.selected_pollrate = pollrate.try_into().expect("Wrong poll rate");
+                    }
+                    Report::Action(action_mode) => match action_mode {
+                        ActionMode::Mouse(button) => {
+                            self.selected_action_type = ActionType::Mouse;
+                            self.selected_action_key.mouse = Some(button);
+                        }
+                        ActionMode::Keyboard(keyboard_key) => {
+                            self.selected_action_type = ActionType::Keyboard;
+                            self.selected_action_key.keyboard = Some(keyboard_key);
+                        }
+                    },
+                    Report::ReportMode(report_mode) => {
+                        self.selected_reportmode = report_mode;
+                    }
+                    Report::Threshold(threshold) => {
+                        self.threshold = threshold;
+                    }
+                }
+            }
+            if let Some(ref mut record_file) = &mut self.record_file {
+                let mut data = record_buffer.join("\n");
+                data.push('\n');
+                record_file
+                    .write_all(data.as_ref())
+                    .map_err(Error::IOError)?;
+            }
+        }
+        if self.init_process <= 10 {
+            self.init_process += 1;
+        }
+        if self.init_process == 10 {
+            self.fakeldat.get_action()?;
+            self.fakeldat.get_poll_rate()?;
+            self.fakeldat.get_threshold()?;
+            self.fakeldat.get_report_mode()?;
+        };
+        Ok(())
+    }
+
+    fn draw_graph(&self) -> iced::Element<Message> {
         let graph_raw = if self.show_graph
             && (self.selected_reportmode == ReportMode::Raw
                 || self.selected_reportmode == ReportMode::Combined)
@@ -413,11 +286,14 @@ impl UI {
             container(Space::new(Length::Shrink, Length::Shrink))
         };
 
-        let graph = container(column![graph_raw, graph_summary].spacing(10))
+        container(column![graph_raw, graph_summary].spacing(10))
             .center_x()
             .width(iced::Length::Fill)
-            .padding(10);
+            .padding(10)
+            .into()
+    }
 
+    fn draw_buttons(&self) -> iced::Element<Message> {
         let record = container(match self.record_file {
             Some(_) => button("Stop recording").on_press(Message::RecordStop),
             None => button("Record").on_press(Message::RecordStart),
@@ -426,28 +302,32 @@ impl UI {
         let clear = container(button("Clear").on_press(Message::Clear)).padding(10);
         let toggle_graph =
             container(button("Toggle graph").on_press(Message::GraphToggle)).padding(10);
-        let mid = container(row![record, clear, toggle_graph])
+        container(row![record, clear, toggle_graph])
             .center_x()
             .width(iced::Length::Fill)
-            .padding(10);
+            .padding(10)
+            .into()
+    }
 
-        let spacer = Rule::horizontal(1);
-
+    fn draw_rate_selection(&self) -> iced::Element<Message> {
         let poll_rate_text = text("Poll rate");
         let poll_rate_options: Container<'_, Message> = container(pick_list(
             &PollRate::ALL[..],
             Some(self.selected_pollrate),
             Message::PollRateChanged,
         ));
-        let poll_rate = container(
+        container(
             row![poll_rate_text, poll_rate_options]
                 .align_items(Alignment::Center)
                 .spacing(20),
         )
         .center_x()
         .width(iced::Length::Fill)
-        .padding(10);
+        .padding(10)
+        .into()
+    }
 
+    fn draw_mode_selection(&self) -> iced::Element<Message> {
         let report_mode_text = text("Report mode");
         let report_mode_options = row![
             radio(
@@ -470,15 +350,18 @@ impl UI {
             )
         ]
         .spacing(20);
-        let report_mode = container(
+        container(
             row![report_mode_text, report_mode_options]
                 .align_items(Alignment::Center)
                 .spacing(20),
         )
         .center_x()
         .width(iced::Length::Fill)
-        .padding(10);
+        .padding(10)
+        .into()
+    }
 
+    fn draw_action_selection(&self) -> iced::Element<Message> {
         let action_mode_text = text("Action mode");
         let action_mode_options = row![
             radio(
@@ -495,7 +378,7 @@ impl UI {
             ),
         ]
         .spacing(20);
-        let action_mode = container(
+        container(
             row![
                 action_mode_text,
                 action_mode_options,
@@ -521,8 +404,11 @@ impl UI {
         )
         .center_x()
         .width(iced::Length::Fill)
-        .padding(10);
+        .padding(10)
+        .into()
+    }
 
+    fn threshold_selection(&self) -> iced::Element<Message> {
         let threshold_text = text(format!("Threshold: {}", self.threshold));
         let threshold_slider = slider(
             // i16::MIN..=i16::MAX,
@@ -533,41 +419,24 @@ impl UI {
         .on_release(Message::ThresholdReleased)
         .step(10i16)
         .shift_step(1i16);
-        let threshold = container(
+        container(
             row![threshold_text, threshold_slider]
                 .align_items(Alignment::Center)
                 .spacing(20),
         )
         .center_x()
         .width(iced::Length::Fill)
-        .padding(10);
-
-        let main_stack = column![
-            graph,
-            mid,
-            spacer,
-            poll_rate,
-            report_mode,
-            action_mode,
-            threshold,
-        ];
-
-        container(main_stack)
-            .center_x()
-            .center_y()
-            .padding(20)
-            .width(iced::Length::Fill)
-            .height(iced::Length::Fill)
-            .into()
+        .padding(10)
+        .into()
     }
 
-    fn theme(&self) -> Theme {
+    pub fn theme(&self) -> Theme {
         self.theme.clone()
     }
 
     #[allow(clippy::unused_self)]
     // just for polling fakeldat
-    fn subscription(&self) -> Subscription<Message> {
+    pub fn subscription(&self) -> Subscription<Message> {
         // for raw it needs to be at least (pollrate/256)
         let hertz = match self.selected_reportmode {
             ReportMode::Raw | ReportMode::Combined => {
@@ -592,9 +461,52 @@ impl UI {
     }
 }
 
-pub fn run() -> iced::Result {
-    let program = iced::program("FakeLDAT", UI::update, UI::view)
-        .theme(UI::theme)
-        .subscription(UI::subscription);
-    program.run()
+impl Chart<Message> for UI {
+    type State = ();
+    fn draw_chart<DB: DrawingBackend>(&self, state: &Self::State, root: DrawingArea<DB, Shift>) {
+        _ = root.fill(&WHITE);
+        let builder = ChartBuilder::on(&root);
+        self.build_chart(state, builder);
+    }
+    fn build_chart<DB: DrawingBackend>(&self, _state: &Self::State, mut builder: ChartBuilder<DB>) {
+        let min = self
+            .raw_data
+            .iter()
+            .fold(std::u64::MAX, |a, b| a.min(b.timestamp));
+        let max = self
+            .raw_data
+            .iter()
+            .fold(std::u64::MIN, |a, b| a.max(b.timestamp));
+        let mut chart = builder
+            .set_all_label_area_size(45)
+            .top_x_label_area_size(20)
+            .x_label_area_size(20)
+            .build_cartesian_2d(min..max, 0u64..4096)
+            .unwrap();
+        chart
+            .draw_series(LineSeries::new(
+                self.raw_data
+                    .iter()
+                    .map(|report| (report.timestamp, report.brightness.into())),
+                BLUE.stroke_width(2),
+            ))
+            .expect("Draw brightness line");
+        chart
+            .configure_mesh()
+            .disable_mesh()
+            .disable_x_axis()
+            .y_label_formatter(&ToString::to_string)
+            .draw()
+            .expect("Draw mesh");
+        chart
+            .draw_series(self.trigger.iter().filter_map(|trigger| {
+                if *trigger > min {
+                    Some(Rectangle::new([(*trigger, 4095), (*trigger, 0)], RED))
+                } else {
+                    None
+                }
+            }))
+            .expect("Draw triggers");
+        // TODO: visualize the threshold
+    }
 }

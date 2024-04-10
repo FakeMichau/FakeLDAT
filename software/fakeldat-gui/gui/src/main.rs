@@ -1,5 +1,9 @@
-mod app;
+use ui::UI;
+mod ui;
 
 fn main() -> iced::Result {
-    app::run()
+    let program = iced::program("FakeLDAT", UI::update, UI::view)
+        .theme(UI::theme)
+        .subscription(UI::subscription);
+    program.run()
 }
