@@ -3,8 +3,9 @@ use chrono::{DateTime, Utc};
 #[allow(clippy::wildcard_imports)]
 use enums::*;
 use fakeldat_lib::{
-    serialport, ActionMode, Error, FakeLDAT, KeyboardKey, MouseButton, RawReport, Report,
-    ReportMode, SummaryReport,
+    serialport::{self, SerialPort},
+    ActionMode, Error, FakeLDAT, KeyboardKey, MouseButton, RawReport, Report, ReportMode,
+    SummaryReport,
 };
 use iced::widget::{
     button, column, container, pick_list, radio, row, scrollable, slider, text, Container, Rule,
@@ -17,11 +18,11 @@ use plotters::series::LineSeries;
 use plotters::style::{Color, BLUE, RED, WHITE};
 use plotters_iced::{Chart, ChartBuilder, ChartWidget, DrawingArea, DrawingBackend};
 use rfd::FileDialog;
-use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::time::Duration;
+use std::{cmp::Ordering, process::exit, thread::sleep};
 
 pub struct UI {
     fakeldat: FakeLDAT,
@@ -37,15 +38,25 @@ pub struct UI {
     summary_data: Vec<SummaryReport>, // TODO: old data is not being removed
     trigger: Vec<u64>,                // TODO: old data is not being removed
     init_process: u8,
+    forced_tick_rate: Option<u16>,
 }
 
 impl Default for UI {
     fn default() -> Self {
-        let ports = serialport::available_ports().expect("No ports found!");
-        let port = serialport::new(&ports.first().expect("No Serial Ports").port_name, 115_200)
-            .timeout(Duration::from_secs(100_000))
-            .open()
-            .expect("Failed to open port");
+        let port;
+        let mut error_count = 0;
+        loop {
+            if let Ok(new_port) = Self::get_port() {
+                port = new_port;
+                break;
+            }
+            eprintln!("Can't find device");
+            error_count += 1;
+            if error_count == 30 {
+                exit(1)
+            }
+            sleep(Duration::from_secs(2));
+        }
         Self {
             fakeldat: FakeLDAT::create(port).expect("Couldn't create FakeLDAT"),
             theme: Theme::Dark,
@@ -60,6 +71,7 @@ impl Default for UI {
             summary_data: Vec::new(),
             trigger: Vec::new(),
             init_process: 0,
+            forced_tick_rate: None,
         }
     }
 }
@@ -79,6 +91,16 @@ impl UI {
                     buf[0], buf[1]
                 ),
                 Error::PortFail(serialport_error) => {
+                    match serialport_error.kind {
+                        serialport::ErrorKind::NoDevice | serialport::ErrorKind::Unknown => {
+                            self.forced_tick_rate = Some(1);
+                            // This allows the UI to not freeze
+                            if Self::get_port().is_ok() {
+                                *self = Self::default();
+                            }
+                        }
+                        _ => todo!(),
+                    };
                     eprintln!("Port fail: {}", serialport_error.description);
                 }
                 Error::SendCommandFail => eprintln!("Issue with sending a command"),
@@ -108,7 +130,7 @@ impl UI {
             .height(iced::Length::Fill)
             .into()
     }
-    
+
     #[allow(clippy::needless_pass_by_value)]
     fn update_with_error(&mut self, message: Message) -> Result<(), Error> {
         match message {
@@ -177,7 +199,7 @@ impl UI {
     fn tick(&mut self) -> Result<(), Error> {
         self.fakeldat.poll_bulk_data()?;
         if self.init_process < 10 {
-            _=self.fakeldat.take_report_buffer();
+            _ = self.fakeldat.take_report_buffer();
         }
         if let Some(reports) = self.fakeldat.take_report_buffer() {
             let mut record_buffer = vec![];
@@ -433,6 +455,13 @@ impl UI {
         .into()
     }
 
+    fn get_port() -> Result<Box<dyn SerialPort>, serialport::Error> {
+        let ports = serialport::available_ports()?;
+        serialport::new(&ports.first().expect("No Serial Ports").port_name, 115_200)
+            .timeout(Duration::from_secs(100_000))
+            .open()
+    }
+
     pub fn theme(&self) -> Theme {
         self.theme.clone()
     }
@@ -441,13 +470,18 @@ impl UI {
     // just for polling fakeldat
     pub fn subscription(&self) -> Subscription<Message> {
         // for raw it needs to be at least (pollrate/256)
-        let hertz = match self.selected_reportmode {
-            ReportMode::Raw | ReportMode::Combined => {
-                std::convert::Into::<u16>::into(self.selected_pollrate) / 200
-            }
-            ReportMode::Summary => 10,
-        }
-        .clamp(10, u16::MAX);
+        let hertz = self.forced_tick_rate.map_or_else(
+            || {
+                match self.selected_reportmode {
+                    ReportMode::Raw | ReportMode::Combined => {
+                        std::convert::Into::<u16>::into(self.selected_pollrate) / 200
+                    }
+                    ReportMode::Summary => 10,
+                }
+                .clamp(10, u16::MAX)
+            },
+            |forced_tick_rate| forced_tick_rate,
+        );
         iced::time::every(Duration::from_micros(1_000_000 / u64::from(hertz)))
             .map(|_| Message::Tick)
     }
