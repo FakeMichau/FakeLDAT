@@ -7,7 +7,10 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use fakeldat_lib::{serialport, ActionMode, Error, FakeLDAT, RawReport, ReportMode, SummaryReport};
+use fakeldat_lib::{
+    serialport, ActionMode, Error, FakeLDAT, KeyboardKey, MouseButton, RawReport, ReportMode,
+    SummaryReport,
+};
 use iced::{
     widget::{
         button, column, container, pick_list, radio, row, scrollable, slider, text, Container,
@@ -19,7 +22,7 @@ use plotters::{
     coord::Shift,
     element::Rectangle,
     series::LineSeries,
-    style::{BLUE, RED, WHITE},
+    style::{Color, BLUE, RED, WHITE},
 };
 use plotters_iced::{Chart, ChartBuilder, ChartWidget, DrawingArea, DrawingBackend};
 use rfd::FileDialog;
@@ -29,8 +32,8 @@ struct UI {
     theme: Theme,
     selected_pollrate: PollRate,
     selected_reportmode: ReportMode,
-    selected_actionmode: ActionMode,
-    selected_actionkey: Option<u8>,
+    selected_action_type: ActionType,
+    selected_action_key: ActionKey,
     threshold: i16,
     show_graph: bool,
     record_file: Option<File>,
@@ -38,6 +41,12 @@ struct UI {
     summary_data: Vec<SummaryReport>, // TODO: old data is not being removed
     trigger: Vec<u64>,                // TODO: old data is not being removed
     init_process: u8,
+}
+
+#[derive(Default)]
+struct ActionKey {
+    mouse: Option<MouseButton>,
+    keyboard: Option<KeyboardKey>,
 }
 
 impl Default for UI {
@@ -52,8 +61,8 @@ impl Default for UI {
             theme: Theme::Dark,
             selected_pollrate: PollRate::_2000,
             selected_reportmode: ReportMode::Raw,
-            selected_actionmode: ActionMode::Mouse,
-            selected_actionkey: Some(1), // LMB
+            selected_action_type: ActionType::Mouse,
+            selected_action_key: ActionKey::default(),
             threshold: 150,
             show_graph: true,
             record_file: None,
@@ -66,7 +75,7 @@ impl Default for UI {
 }
 
 #[derive(Debug, Clone)]
-pub enum Message {
+enum Message {
     Tick,
     RecordStart,
     RecordStop,
@@ -74,10 +83,26 @@ pub enum Message {
     GraphToggle,
     PollRateChanged(PollRate), // TODO: change to actually value from the device, can't call the device in view, data needs to be retrieved in update
     ReportModeChanged(ReportMode),
-    ActionModeChanged(ActionMode),
+    ActionModeChanged(ActionType),
     ActionKeyChanged(u8),
     ThresholdChanged(i16),
     ThresholdReleased,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActionType {
+    Mouse,
+    Keyboard,
+}
+
+impl std::fmt::Display for ActionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Mouse => write!(f, "Mouse"),
+            Self::Keyboard => write!(f, "Keyboard"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,12 +187,13 @@ impl Chart<Message> for UI {
             .x_label_area_size(20)
             .build_cartesian_2d(min..max, 0u64..4096)
             .unwrap();
-        let nice = self
-            .raw_data
-            .iter()
-            .map(|report| (report.timestamp, report.brightness.into()));
         chart
-            .draw_series(LineSeries::new(nice, &BLUE))
+            .draw_series(LineSeries::new(
+                self.raw_data
+                    .iter()
+                    .map(|report| (report.timestamp, report.brightness.into())),
+                BLUE.stroke_width(2),
+            ))
             .expect("Draw brightness line");
         chart
             .configure_mesh()
@@ -208,6 +234,7 @@ impl UI {
                 }
                 Error::SendCommandFail => eprintln!("Issue with sending a command"),
                 Error::IOError(io_error) => eprintln!("Issue with saving a file: {io_error}"),
+                Error::InvalidEnumConverion => eprintln!("TryFrom enum conversion error")
             }
         };
     }
@@ -245,10 +272,16 @@ impl UI {
                                 self.selected_pollrate =
                                     pollrate.try_into().expect("Wrong poll rate");
                             }
-                            fakeldat_lib::Report::Action(action_mode, key) => {
-                                self.selected_actionmode = action_mode;
-                                self.selected_actionkey = Some(key);
-                            }
+                            fakeldat_lib::Report::Action(action_mode) => match action_mode {
+                                ActionMode::Mouse(button) => {
+                                    self.selected_action_type = ActionType::Mouse;
+                                    self.selected_action_key.mouse = Some(button);
+                                }
+                                ActionMode::Keyboard(keyboard_key) => {
+                                    self.selected_action_type = ActionType::Keyboard;
+                                    self.selected_action_key.keyboard = Some(keyboard_key);
+                                }
+                            },
                             fakeldat_lib::Report::ReportMode(report_mode) => {
                                 self.selected_reportmode = report_mode;
                             }
@@ -312,12 +345,20 @@ impl UI {
                 self.fakeldat.set_report_mode(report_mode)?;
                 self.record_file = None;
             }
-            Message::ActionModeChanged(action_mode) => {
-                self.selected_actionmode = action_mode;
-                self.selected_actionkey = None;
+            Message::ActionModeChanged(action_type) => {
+                self.selected_action_type = action_type;
+                let key_option = match action_type {
+                    ActionType::Mouse => self.selected_action_key.mouse.map(|v| v as u8),
+                    ActionType::Keyboard => self.selected_action_key.keyboard.map(|v| v as u8),
+                };
+                if let Some(key) = key_option {
+                    let action_mode = ActionMode::try_from(self.selected_action_type as u8, key)?;
+                    self.fakeldat.set_action(action_mode)?;
+                }
             }
             Message::ActionKeyChanged(key) => {
-                self.fakeldat.set_action(self.selected_actionmode, key)?;
+                let action_mode = ActionMode::try_from(self.selected_action_type as u8, key)?;
+                self.fakeldat.set_action(action_mode)?;
             }
             Message::ThresholdChanged(threshold) => self.threshold = threshold,
             Message::ThresholdReleased => {
@@ -441,15 +482,15 @@ impl UI {
         let action_mode_text = text("Action mode");
         let action_mode_options = row![
             radio(
-                ActionMode::Mouse.to_string(),
-                ActionMode::Mouse,
-                Some(self.selected_actionmode),
+                ActionType::Mouse.to_string(),
+                ActionType::Mouse,
+                Some(self.selected_action_type),
                 Message::ActionModeChanged
             ),
             radio(
-                ActionMode::Keyboard.to_string(),
-                ActionMode::Keyboard,
-                Some(self.selected_actionmode),
+                ActionType::Keyboard.to_string(),
+                ActionType::Keyboard,
+                Some(self.selected_action_type),
                 Message::ActionModeChanged
             ),
         ]
@@ -458,15 +499,22 @@ impl UI {
             row![
                 action_mode_text,
                 action_mode_options,
-                pick_list(
-                    // TODO: convert them into chars and "LMB, RMB" respectively
-                    match self.selected_actionmode {
-                        ActionMode::Mouse => vec![0, 1, 2],
-                        ActionMode::Keyboard => (97..=122).collect(),
-                    },
-                    self.selected_actionkey,
-                    Message::ActionKeyChanged,
-                )
+                match self.selected_action_type {
+                    ActionType::Mouse => {
+                        container(pick_list(
+                            &MouseButton::ALL[..],
+                            self.selected_action_key.mouse,
+                            |key| Message::ActionKeyChanged(key as u8),
+                        ))
+                    }
+                    ActionType::Keyboard => {
+                        container(pick_list(
+                            &KeyboardKey::ALL[..],
+                            self.selected_action_key.keyboard,
+                            |key| Message::ActionKeyChanged(key as u8),
+                        ))
+                    }
+                },
             ]
             .align_items(Alignment::Center)
             .spacing(20),

@@ -1,4 +1,4 @@
-use std::{io::Bytes, iter::Peekable, mem::take};
+use std::{fmt::Display, io::Bytes, iter::Peekable, mem::take};
 
 pub use serialport;
 use serialport::SerialPort;
@@ -20,6 +20,7 @@ pub enum Error {
     ReadTooLittleData,
     SendCommandFail,
     IOError(std::io::Error),
+    InvalidEnumConverion
 }
 
 impl From<serialport::Error> for Error {
@@ -28,14 +29,13 @@ impl From<serialport::Error> for Error {
     }
 }
 
-
 impl From<std::io::Error> for Error {
     fn from(value: std::io::Error) -> Self {
         Self::IOError(value)
     }
 }
 
-macro_rules! convert_enum {
+macro_rules! create_try_from {
     ($(#[$meta:meta])* $vis:vis enum $name:ident {
         $($(#[$vmeta:meta])* $vname:ident $(= $val:expr)?,)*
     }) => {
@@ -45,19 +45,20 @@ macro_rules! convert_enum {
         }
 
         impl std::convert::TryFrom<u8> for $name {
-            type Error = ();
+            type Error = Error;
 
             fn try_from(v: u8) -> std::result::Result<Self, Self::Error> {
                 match v {
                     $(x if x == $name::$vname as u8 => Ok($name::$vname),)*
-                    _ => Err(()),
+                    _ => Err(Error::InvalidEnumConverion),
                 }
             }
         }
     }
 }
 
-convert_enum! {
+create_try_from! {
+    #[repr(u8)]
     #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd)]
     pub enum Command {
         SetPollRate = 0x01,
@@ -96,7 +97,7 @@ impl std::fmt::Display for Command {
     }
 }
 
-convert_enum! {
+create_try_from! {
     #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd)]
     pub enum ReportMode {
         Raw,
@@ -119,19 +120,132 @@ impl std::fmt::Display for ReportMode {
     }
 }
 
-convert_enum! {
+create_try_from! {
+    #[repr(u8)]
     #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd)]
-    pub enum ActionMode {
-        Mouse,
-        Keyboard,
+    pub enum KeyboardKey {
+        A = b'a',
+        B = b'b',
+        C = b'c',
+        D = b'd',
+        E = b'e',
+        F = b'f',
+        G = b'g',
+        H = b'h',
+        I = b'i',
+        J = b'j',
+        K = b'k',
+        L = b'l',
+        M = b'm',
+        N = b'n',
+        O = b'o',
+        P = b'p',
+        Q = b'q',
+        R = b'r',
+        S = b's',
+        T = b't',
+        U = b'u',
+        V = b'v',
+        W = b'w',
+        X = b'x',
+        Y = b'y',
+        Z = b'z',
     }
 }
 
-impl std::fmt::Display for ActionMode {
+impl KeyboardKey {
+    pub const ALL: [Self; 26] = [
+        Self::A,
+        Self::B,
+        Self::C,
+        Self::D,
+        Self::E,
+        Self::F,
+        Self::G,
+        Self::H,
+        Self::I,
+        Self::J,
+        Self::K,
+        Self::L,
+        Self::M,
+        Self::N,
+        Self::O,
+        Self::P,
+        Self::Q,
+        Self::R,
+        Self::S,
+        Self::T,
+        Self::U,
+        Self::V,
+        Self::W,
+        Self::X,
+        Self::Y,
+        Self::Z,
+    ];
+}
+
+impl Display for KeyboardKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", (*self as u8 as char).to_uppercase())
+    }
+}
+
+create_try_from! {
+    #[repr(u8)]
+    #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd)]
+    pub enum MouseButton {
+        Left = 1,
+        Right = 2,
+        Middle = 4,
+    }
+}
+
+impl MouseButton {
+    pub const ALL: [Self; 3] = [Self::Left, Self::Right, Self::Middle];
+}
+
+impl std::fmt::Display for MouseButton {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Left => "Left",
+                Self::Right => "Right",
+                Self::Middle => "Middle",
+            }
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd)]
+pub enum ActionMode {
+    Mouse(MouseButton),
+    Keyboard(KeyboardKey),
+}
+
+impl ActionMode {
+    const fn get_key(self) -> u8 {
         match self {
-            Self::Mouse => write!(f, "Mouse"),
-            Self::Keyboard => write!(f, "Keyboard"),
+            Self::Mouse(button) => button as u8,
+            Self::Keyboard(key) => key as u8,
+        }
+    }
+
+    pub fn try_from(mode: u8, key: u8) -> Result<Self> {
+        match mode {
+            0 => Ok(Self::Mouse(MouseButton::try_from(key)?)),
+            1 => Ok(Self::Keyboard(KeyboardKey::try_from(key)?)),
+            _ => Err(Error::InvalidSetting(Command::SetAction, [mode, key])),
+        }
+    }
+}
+
+impl From<ActionMode> for u8 {
+    fn from(value: ActionMode) -> Self {
+        match value {
+            ActionMode::Mouse(_) => 0,
+            ActionMode::Keyboard(_) => 1,
         }
     }
 }
@@ -142,7 +256,7 @@ pub enum Report {
     PollRate(u16),
     ReportMode(ReportMode),
     Threshold(i16),
-    Action(ActionMode, u8), // action and key
+    Action(ActionMode), // action and key
 }
 
 pub struct RawReport {
@@ -172,10 +286,7 @@ impl FakeLDAT {
         port.write_data_terminal_ready(true)?;
         Ok(Self {
             report_buffer: Some(Vec::new()),
-            read_iter: port
-                .try_clone()?
-                .bytes()
-                .peekable(),
+            read_iter: port.try_clone()?.bytes().peekable(),
             port,
         })
     }
@@ -213,8 +324,12 @@ impl FakeLDAT {
             &mut self.port,
         )
     }
-    pub fn set_action(&mut self, action_mode: ActionMode, key: u8) -> Result<()> {
-        Self::send_command(Command::SetAction, [action_mode as u8, key], &mut self.port)
+    pub fn set_action(&mut self, action_mode: ActionMode) -> Result<()> {
+        Self::send_command(
+            Command::SetAction,
+            [action_mode.into(), action_mode.get_key()],
+            &mut self.port,
+        )
     }
 
     pub fn get_poll_rate(&mut self) -> Result<()> {
@@ -252,10 +367,7 @@ impl FakeLDAT {
         } else {
             return Err(Error::ReadTooLittleData);
         }
-        command_buffer[0] = self
-            .read_iter
-            .next()
-            .expect("Command")?;
+        command_buffer[0] = self.read_iter.next().expect("Command")?;
         let Ok(command) = command_buffer[0].try_into() else {
             return Err(Error::InvalidCommand(command_buffer[0]));
         };
@@ -264,10 +376,7 @@ impl FakeLDAT {
         if command == Command::ReportRaw || command == Command::ReportSummary {
             let mut buf = [0u8; 12];
             for item in &mut buf {
-                *item = self
-                    .read_iter
-                    .next()
-                    .expect("Data")?;
+                *item = self.read_iter.next().expect("Data")?;
             }
             let calculated_checksum: u8 = sum_slice(&buf[..=10]).wrapping_add(command_buffer[0]);
             if buf[11] == calculated_checksum {
@@ -292,15 +401,9 @@ impl FakeLDAT {
             let mut settings_buffer = [0u8; 2];
             let mut checksum_buffer = [0u8; 1];
             for item in &mut settings_buffer {
-                *item = self
-                    .read_iter
-                    .next()
-                    .expect("Data")?;
+                *item = self.read_iter.next().expect("Data")?;
             }
-            checksum_buffer[0] = self
-                .read_iter
-                .next()
-                .expect("Data")?;
+            checksum_buffer[0] = self.read_iter.next().expect("Data")?;
             let calculated_checksum: u8 =
                 sum_slice(&[command_buffer[0], settings_buffer[0], settings_buffer[1]]);
             if checksum_buffer[0] != calculated_checksum {
@@ -324,10 +427,10 @@ impl FakeLDAT {
                     Ok(Report::Threshold(i16::from_le_bytes(settings_buffer)))
                 }
                 Command::GetAction | Command::SetAction => {
-                    let Ok(action_mode) = ActionMode::try_from(settings_buffer[0]) else {
-                        return Err(Error::InvalidSetting(command, settings_buffer));
-                    };
-                    Ok(Report::Action(action_mode, settings_buffer[1]))
+                    ActionMode::try_from(settings_buffer[0], settings_buffer[1]).map_or_else(
+                        |_| Err(Error::InvalidSetting(command, settings_buffer)),
+                        |action_mode| Ok(Report::Action(action_mode)),
+                    )
                 }
                 _ => Err(Error::Unimplemented(command, settings_buffer)),
             }
@@ -358,8 +461,7 @@ impl FakeLDAT {
                     Error::ReadTooLittleData => read_next = false,
                     Error::WrongChecksum(a, b, c) => {
                         println!("Wrong checksum: {a}, {b}, {c}");
-                        self.port
-                            .clear(serialport::ClearBuffer::Input)?;
+                        self.port.clear(serialport::ClearBuffer::Input)?;
                     }
                     why => return Result::Err(why),
                 },
