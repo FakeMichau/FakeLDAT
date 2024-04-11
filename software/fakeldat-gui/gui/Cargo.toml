@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 fakeldat_lib = { path = "../fakeldat_lib" }
-iced = { git = "https://github.com/iced-rs/iced.git", rev = "3013463baa71504488a20436beb3db87ecb66df0", features = ["canvas", "tokio"]}
+iced = { git = "https://github.com/iced-rs/iced.git", rev = "ee105e3bee1bc676dcf3324693984ccda8e4e733", features = ["tiny-skia", "canvas", "tokio"], default-features = false}
 plotters-iced = { path = "../external/plotters-iced" }
 plotters = "0.3"
 rfd = "0.14.1"
