@@ -20,7 +20,7 @@ pub enum Error {
     ReadTooLittleData,
     SendCommandFail,
     IOError(std::io::Error),
-    InvalidEnumConverion
+    InvalidEnumConverion,
 }
 
 impl From<serialport::Error> for Error {
@@ -257,6 +257,7 @@ pub enum Report {
     ReportMode(ReportMode),
     Threshold(i16),
     Action(ActionMode), // action and key
+    ManualTrigger,
 }
 
 pub struct RawReport {
@@ -345,6 +346,10 @@ impl FakeLDAT {
         Self::send_command(Command::GetAction, [0, 0], &mut self.port)
     }
 
+    pub fn manual_trigger(&mut self) -> Result<()> {
+        Self::send_command(Command::ManualTrigger, [0, 0], &mut self.port)
+    }
+
     #[allow(clippy::too_many_lines)]
     // This will block
     fn poll_data(&mut self) -> Result<Report> {
@@ -431,6 +436,9 @@ impl FakeLDAT {
                         |_| Err(Error::InvalidSetting(command, settings_buffer)),
                         |action_mode| Ok(Report::Action(action_mode)),
                     )
+                }
+                Command::ManualTrigger => {
+                    Ok(Report::ManualTrigger)
                 }
                 _ => Err(Error::Unimplemented(command, settings_buffer)),
             }

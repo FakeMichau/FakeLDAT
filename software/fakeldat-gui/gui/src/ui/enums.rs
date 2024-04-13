@@ -7,6 +7,7 @@ pub enum Message {
     RecordStop,
     Clear,
     GraphToggle,
+    ManualTrigger,
     PollRateChanged(PollRate),
     ReportModeChanged(ReportMode),
     ActionModeChanged(ActionType),

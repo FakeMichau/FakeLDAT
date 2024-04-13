@@ -291,7 +291,8 @@ public:
     return interval_us;
   }
   void report_raw() {
-    write_report(Command::REPORT_RAW, timestamp, sensor->get_brightness(), (uint8_t)trigger->get_state());
+    auto trigger_state = trigger->get_state() || trigger_override == OVERRIDE_IN_PROGRESS || trigger_override == PRESS;
+    write_report(Command::REPORT_RAW, timestamp, sensor->get_brightness(), (uint8_t)trigger_state);
   }
   void report_summary() {
     uint16_t threshold = calc_threshold(sensor->get_brightness());

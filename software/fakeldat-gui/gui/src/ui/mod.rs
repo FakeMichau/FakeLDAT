@@ -165,6 +165,9 @@ impl UI {
                 self.summary_data = vec![];
             }
             Message::GraphToggle => self.show_graph = !self.show_graph,
+            Message::ManualTrigger => {
+                self.fakeldat.manual_trigger()?;
+            }
             Message::PollRateChanged(pollrate) => {
                 self.fakeldat.set_poll_rate(pollrate.into())?;
             }
@@ -245,6 +248,7 @@ impl UI {
                     Report::Threshold(threshold) => {
                         self.threshold = threshold;
                     }
+                    Report::ManualTrigger => { /* Manual trigger successful */ },
                 }
             }
             if let Some(ref mut record_file) = &mut self.record_file {
@@ -327,7 +331,9 @@ impl UI {
         let clear = container(button("Clear").on_press(Message::Clear)).padding(10);
         let toggle_graph =
             container(button("Toggle graph").on_press(Message::GraphToggle)).padding(10);
-        container(row![record, clear, toggle_graph])
+        let manual_trigger =
+            container(button("Manual Trigger").on_press(Message::ManualTrigger)).padding(10);
+        container(row![record, clear, toggle_graph, manual_trigger])
             .center_x()
             .width(iced::Length::Fill)
             .padding(10)
