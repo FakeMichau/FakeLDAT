@@ -1,6 +1,7 @@
 [profile.release]
 strip = true
 lto = true
+# debug=1
 
 [workspace]
 resolver = "2"

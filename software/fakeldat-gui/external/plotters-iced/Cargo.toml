@@ -19,9 +19,9 @@ authors = ["Joylei <leingliu@gmail.com>"]
 [dependencies]
 plotters = { version = "0.3", default_features = false }
 plotters-backend = "0.3"
-iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "ee105e3bee1bc676dcf3324693984ccda8e4e733", features = ["canvas"]}
+iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "105b8bd5ad6ade1f203a0d8b0b93bd06f61f621a", features = ["canvas"]}
 # iced_widget = { version = "0.12", features = ["canvas"] }
-iced_graphics = { git = "https://github.com/iced-rs/iced.git", rev = "ee105e3bee1bc676dcf3324693984ccda8e4e733"}
+iced_graphics = { git = "https://github.com/iced-rs/iced.git", rev = "105b8bd5ad6ade1f203a0d8b0b93bd06f61f621a"}
 # iced_graphics = "0.12"
 once_cell = "1"
 
