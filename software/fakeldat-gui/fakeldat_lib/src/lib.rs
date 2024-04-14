@@ -356,16 +356,15 @@ impl FakeLDAT {
             return Err(Error::ReadTooLittleData);
         }
 
-        let mut command_buffer = [0u8; 1];
-        self.read.read_exact(&mut command_buffer)?;
-        let Ok(command) = command_buffer[0].try_into() else {
-            return Err(Error::InvalidCommand(command_buffer[0]));
+        let mut buf = [0u8; 16];
+        self.read.read_exact(&mut buf)?;
+
+        let Ok(command) = buf[0].try_into() else {
+            return Err(Error::InvalidCommand(buf[0]));
         };
 
-        let mut buf = [0u8; 15];
-        self.read.read_exact(&mut buf)?;
-        let calculated_checksum: u8 = sum_slice(&buf[..=13]).wrapping_add(command_buffer[0]);
-        let received_checksum = buf[14];
+        let calculated_checksum: u8 = sum_slice(&buf[..=14]);
+        let received_checksum = buf[15];
         if received_checksum != calculated_checksum {
             return Err(Error::WrongChecksum(
                 command,
@@ -373,17 +372,17 @@ impl FakeLDAT {
                 calculated_checksum,
             ));
         }
-        let settings_buffer: [u8; 2] = buf[..2].try_into().unwrap();
+        let settings_buffer: [u8; 2] = buf[1..=2].try_into().unwrap();
 
         match command {
             Command::ReportRaw => Ok(Report::Raw(RawReport {
-                timestamp: u64::from_le_bytes(buf[..=7].try_into().unwrap()),
-                brightness: u16::from_le_bytes(buf[8..=9].try_into().unwrap()),
-                trigger: buf[10] == 1,
+                timestamp: u64::from_le_bytes(buf[1..=8].try_into().unwrap()),
+                brightness: u16::from_le_bytes(buf[9..=10].try_into().unwrap()),
+                trigger: buf[11] == 1,
             })),
             Command::ReportSummary => Ok(Report::Summary(SummaryReport {
-                delay: u64::from_le_bytes(buf[..=7].try_into().unwrap()),
-                threshold: u16::from_le_bytes(buf[8..=9].try_into().unwrap()),
+                delay: u64::from_le_bytes(buf[1..=8].try_into().unwrap()),
+                threshold: u16::from_le_bytes(buf[9..=10].try_into().unwrap()),
             })),
             Command::GetPollRate | Command::SetPollRate => {
                 Ok(Report::PollRate(u16::from_le_bytes(settings_buffer)))
