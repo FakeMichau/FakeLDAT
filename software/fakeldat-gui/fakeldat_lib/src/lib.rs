@@ -14,8 +14,6 @@ pub enum Error {
     InvalidSetting(Command, [u8; 2]),
     // value of the command received
     InvalidCommand(u8),
-    // value of the command and settings received
-    Unimplemented(Command, [u8; 2]),
     PortFail(serialport::Error),
     ReadTooLittleData,
     SendCommandFail,
@@ -357,7 +355,7 @@ impl FakeLDAT {
         if self.port.bytes_to_read()? < 16 {
             return Err(Error::ReadTooLittleData);
         }
-        
+
         let mut command_buffer = [0u8; 1];
         self.read.read_exact(&mut command_buffer)?;
         let Ok(command) = command_buffer[0].try_into() else {
@@ -375,48 +373,37 @@ impl FakeLDAT {
                 calculated_checksum,
             ));
         }
+        let settings_buffer: [u8; 2] = buf[..2].try_into().unwrap();
 
-        if command == Command::ReportRaw || command == Command::ReportSummary {
-            let first = u64::from_le_bytes(buf[..=7].try_into().unwrap());
-            let second = u16::from_le_bytes(buf[8..=9].try_into().unwrap());
-            Ok(match command {
-                Command::ReportRaw => Report::Raw(RawReport {
-                    timestamp: first,
-                    brightness: second,
-                    trigger: buf[10] == 1,
-                }),
-                Command::ReportSummary => Report::Summary(SummaryReport {
-                    delay: first,
-                    threshold: second,
-                }),
-                _ => unreachable!(),
-            })
-        } else {
-            let settings_buffer: [u8; 2] = buf[..2].try_into().unwrap();
-            match command {
-                Command::GetPollRate | Command::SetPollRate => {
-                    Ok(Report::PollRate(u16::from_le_bytes(settings_buffer)))
-                }
-                Command::GetReportMode | Command::SetReportMode => {
-                    let Ok(report_mode) = ReportMode::try_from(settings_buffer[0]) else {
-                        return Err(Error::InvalidSetting(command, settings_buffer));
-                    };
-                    Ok(Report::ReportMode(report_mode))
-                }
-                Command::GetThreshold | Command::SetThreshold => {
-                    Ok(Report::Threshold(i16::from_le_bytes(settings_buffer)))
-                }
-                Command::GetAction | Command::SetAction => {
-                    ActionMode::try_from(settings_buffer[0], settings_buffer[1]).map_or_else(
-                        |_| Err(Error::InvalidSetting(command, settings_buffer)),
-                        |action_mode| Ok(Report::Action(action_mode)),
-                    )
-                }
-                Command::ManualTrigger => {
-                    Ok(Report::ManualTrigger)
-                }
-                _ => Err(Error::Unimplemented(command, settings_buffer)),
+        match command {
+            Command::ReportRaw => Ok(Report::Raw(RawReport {
+                timestamp: u64::from_le_bytes(buf[..=7].try_into().unwrap()),
+                brightness: u16::from_le_bytes(buf[8..=9].try_into().unwrap()),
+                trigger: buf[10] == 1,
+            })),
+            Command::ReportSummary => Ok(Report::Summary(SummaryReport {
+                delay: u64::from_le_bytes(buf[..=7].try_into().unwrap()),
+                threshold: u16::from_le_bytes(buf[8..=9].try_into().unwrap()),
+            })),
+            Command::GetPollRate | Command::SetPollRate => {
+                Ok(Report::PollRate(u16::from_le_bytes(settings_buffer)))
             }
+            Command::GetReportMode | Command::SetReportMode => {
+                ReportMode::try_from(settings_buffer[0]).map_or_else(
+                    |_| Err(Error::InvalidSetting(command, settings_buffer)),
+                    |report_mode| Ok(Report::ReportMode(report_mode)),
+                )
+            }
+            Command::GetThreshold | Command::SetThreshold => {
+                Ok(Report::Threshold(i16::from_le_bytes(settings_buffer)))
+            }
+            Command::GetAction | Command::SetAction => {
+                ActionMode::try_from(settings_buffer[0], settings_buffer[1]).map_or_else(
+                    |_| Err(Error::InvalidSetting(command, settings_buffer)),
+                    |action_mode| Ok(Report::Action(action_mode)),
+                )
+            }
+            Command::ManualTrigger => Ok(Report::ManualTrigger),
         }
     }
 

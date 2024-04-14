@@ -86,10 +86,6 @@ impl UI {
                     eprintln!("Invalid setting for {command}: {:x} {:x}", buf[0], buf[1]);
                 }
                 Error::InvalidCommand(command_id) => eprintln!("Invalid command id: {command_id}"),
-                Error::Unimplemented(command, buf) => eprintln!(
-                    "Unimplemented command: {command}: {:x} {:x}",
-                    buf[0], buf[1]
-                ),
                 Error::PortFail(serialport_error) => {
                     match serialport_error.kind {
                         serialport::ErrorKind::NoDevice | serialport::ErrorKind::Unknown => {
