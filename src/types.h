@@ -162,7 +162,7 @@ class FakeLDAT {
   }
   void write_report(uint8_t command, uint64_t timestamp, uint16_t brightness, uint8_t trigger) {
     uint8_t checksum = command;
-    uint8_t bytes[13]{};
+    uint8_t bytes[16]{};
     bytes[0] = command;
     for (int i = 0; i < sizeof(timestamp); i++) {
       bytes[1 + i] = (timestamp >> (8 * i)) & 0xFF;
@@ -174,7 +174,8 @@ class FakeLDAT {
     }
     bytes[11] = trigger;
     checksum += trigger;
-    bytes[12] = checksum;
+    // 12, 13, 14 are empty
+    bytes[15] = checksum;
     Serial.write(bytes, sizeof(bytes));
   }
 
@@ -226,7 +227,7 @@ public:
     update_trigger_override();
   }
   void check_for_commands() {
-    uint8_t command[4]{};
+    uint8_t command[16]{};
     while (Serial.available() >= sizeof(command) && Serial.readBytes(command, sizeof(command)) == sizeof(command)) {
       bool valid_command = false;
       for (uint8_t i = 0; i < commands_count; i++) {
@@ -277,6 +278,7 @@ public:
       }
 
       command[sizeof(command) - 1] = calc_checksum(command, sizeof(command) - 1);
+      // 3 - 14 are empty
       Serial.write(command, sizeof(command));
     }
   }

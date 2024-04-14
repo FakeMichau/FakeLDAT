@@ -1,4 +1,4 @@
-use std::{fmt::Display, io::Bytes, iter::Peekable, mem::take};
+use std::{fmt::Display, mem::take};
 
 pub use serialport;
 use serialport::SerialPort;
@@ -277,7 +277,7 @@ pub fn sum_slice(data: &[u8]) -> u8 {
 
 pub struct FakeLDAT {
     report_buffer: Option<Vec<Report>>,
-    read_iter: Peekable<Bytes<Box<dyn SerialPort>>>,
+    read: Box<dyn SerialPort>,
     port: Box<dyn SerialPort>,
 }
 
@@ -287,7 +287,7 @@ impl FakeLDAT {
         port.write_data_terminal_ready(true)?;
         Ok(Self {
             report_buffer: Some(Vec::new()),
-            read_iter: port.try_clone()?.bytes().peekable(),
+            read: port.try_clone()?,
             port,
         })
     }
@@ -296,11 +296,12 @@ impl FakeLDAT {
         args: [u8; 2],
         port: &mut T,
     ) -> Result<()> {
-        let mut buf = [0; 4];
+        let mut buf = [0; 16];
         buf[0] = command as u8;
         buf[1] = args[0];
         buf[2] = args[1];
-        buf[3] = sum_slice(&buf[..3]);
+        // 3 - 14 unused
+        buf[15] = sum_slice(&buf[..3]);
         port.write_all(&buf).map_err(|_| Error::SendCommandFail)
     }
 
@@ -353,71 +354,45 @@ impl FakeLDAT {
     #[allow(clippy::too_many_lines)]
     // This will block
     fn poll_data(&mut self) -> Result<Report> {
+        if self.port.bytes_to_read()? < 16 {
+            return Err(Error::ReadTooLittleData);
+        }
+        
         let mut command_buffer = [0u8; 1];
-        if self.port.bytes_to_read()? == 0 {
-            // needed because otherwise peek will block
-            return Err(Error::ReadTooLittleData);
-        }
-        if let Some(command_peek) = self.read_iter.peek() {
-            let command = command_peek.as_ref().expect("Command peek");
-            // 12 and 3 instead of 13 and 4 because peek reads one byte
-            if command == &(Command::ReportRaw as u8) || command == &(Command::ReportSummary as u8)
-            {
-                if self.port.bytes_to_read().unwrap_or_default() < 12 {
-                    return Err(Error::ReadTooLittleData);
-                }
-            } else if self.port.bytes_to_read().unwrap_or_default() < 3 {
-                return Err(Error::ReadTooLittleData);
-            }
-        } else {
-            return Err(Error::ReadTooLittleData);
-        }
-        command_buffer[0] = self.read_iter.next().expect("Command")?;
+        self.read.read_exact(&mut command_buffer)?;
         let Ok(command) = command_buffer[0].try_into() else {
             return Err(Error::InvalidCommand(command_buffer[0]));
         };
 
-        // Reports are 13 bytes, settings are 4 bytes
+        let mut buf = [0u8; 15];
+        self.read.read_exact(&mut buf)?;
+        let calculated_checksum: u8 = sum_slice(&buf[..=13]).wrapping_add(command_buffer[0]);
+        let received_checksum = buf[14];
+        if received_checksum != calculated_checksum {
+            return Err(Error::WrongChecksum(
+                command,
+                received_checksum,
+                calculated_checksum,
+            ));
+        }
+
         if command == Command::ReportRaw || command == Command::ReportSummary {
-            let mut buf = [0u8; 12];
-            for item in &mut buf {
-                *item = self.read_iter.next().expect("Data")?;
-            }
-            let calculated_checksum: u8 = sum_slice(&buf[..=10]).wrapping_add(command_buffer[0]);
-            if buf[11] == calculated_checksum {
-                let first = u64::from_le_bytes(buf[..=7].try_into().unwrap());
-                let second = u16::from_le_bytes(buf[8..=9].try_into().unwrap());
-                Ok(match command {
-                    Command::ReportRaw => Report::Raw(RawReport {
-                        timestamp: first,
-                        brightness: second,
-                        trigger: buf[10] == 1,
-                    }),
-                    Command::ReportSummary => Report::Summary(SummaryReport {
-                        delay: first,
-                        threshold: second,
-                    }),
-                    _ => unreachable!(),
-                })
-            } else {
-                Err(Error::WrongChecksum(command, buf[11], calculated_checksum))
-            }
+            let first = u64::from_le_bytes(buf[..=7].try_into().unwrap());
+            let second = u16::from_le_bytes(buf[8..=9].try_into().unwrap());
+            Ok(match command {
+                Command::ReportRaw => Report::Raw(RawReport {
+                    timestamp: first,
+                    brightness: second,
+                    trigger: buf[10] == 1,
+                }),
+                Command::ReportSummary => Report::Summary(SummaryReport {
+                    delay: first,
+                    threshold: second,
+                }),
+                _ => unreachable!(),
+            })
         } else {
-            let mut settings_buffer = [0u8; 2];
-            let mut checksum_buffer = [0u8; 1];
-            for item in &mut settings_buffer {
-                *item = self.read_iter.next().expect("Data")?;
-            }
-            checksum_buffer[0] = self.read_iter.next().expect("Data")?;
-            let calculated_checksum: u8 =
-                sum_slice(&[command_buffer[0], settings_buffer[0], settings_buffer[1]]);
-            if checksum_buffer[0] != calculated_checksum {
-                return Err(Error::WrongChecksum(
-                    command,
-                    checksum_buffer[0],
-                    calculated_checksum,
-                ));
-            }
+            let settings_buffer: [u8; 2] = buf[..2].try_into().unwrap();
             match command {
                 Command::GetPollRate | Command::SetPollRate => {
                     Ok(Report::PollRate(u16::from_le_bytes(settings_buffer)))
