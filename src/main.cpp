@@ -7,8 +7,8 @@ int usb_hid_poll_interval = 1; // default is 10ms
 uint64_t time_to_sleep = 0;
 void setup() {
   Serial.begin();
-  pin_size_t _auto_pin = 15;
-  pin_size_t button_pin = 13;
+  pin_size_t _macro_pin = 20;
+  pin_size_t button_pin = 16;
   pin_size_t sensor_pin = 26;
   pin_size_t offset_pin = 27;
   m_device = new FakeLDAT(button_pin, sensor_pin, offset_pin, 2000, RAW, MOUSE);
