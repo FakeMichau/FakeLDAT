@@ -67,6 +67,7 @@ create_try_from! {
         GetThreshold = 0x23,
         SetAction = 0x04,
         GetAction = 0x24,
+        MacroTrigger = 0x1E,
         ManualTrigger = 0x1F,
         ReportRaw = 0x41,
         ReportSummary = 0x42,
@@ -89,6 +90,7 @@ impl std::fmt::Display for Command {
                 Self::GetThreshold => "Get threshold",
                 Self::SetAction => "Set action",
                 Self::GetAction => "Get action",
+                Self::MacroTrigger => "Macro trigger",
                 Self::ManualTrigger => "Manual trigger",
             }
         )
@@ -255,6 +257,7 @@ pub enum Report {
     ReportMode(ReportMode),
     Threshold(i16),
     Action(ActionMode), // action and key
+    MacroTrigger(u64),
     ManualTrigger,
 }
 
@@ -402,6 +405,9 @@ impl FakeLDAT {
                     |action_mode| Ok(Report::Action(action_mode)),
                 )
             }
+            Command::MacroTrigger => Ok(Report::MacroTrigger(u64::from_le_bytes(
+                buf[1..=8].try_into().unwrap(),
+            ))),
             Command::ManualTrigger => Ok(Report::ManualTrigger),
         }
     }

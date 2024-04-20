@@ -31,6 +31,7 @@ enum Command {
     GET_THRESHOLD   = 0x23,
     SET_ACTION      = 0x04,
     GET_ACTION      = 0x24,
+    MACRO_TRIGGER   = 0x1E,
     MANUAL_TRIGGER  = 0x1F,
     REPORT_RAW      = 0x41,
     REPORT_SUMMARY  = 0x42,
@@ -38,26 +39,21 @@ enum Command {
 
 // commands that can be received
 constexpr uint8_t allowed_commands[]{
-    SET_POLL_RATE, GET_POLL_RATE, SET_REPORT_MODE, GET_REPORT_MODE, SET_THRESHOLD, GET_THRESHOLD, SET_ACTION, GET_ACTION, MANUAL_TRIGGER,
+    SET_POLL_RATE, GET_POLL_RATE, SET_REPORT_MODE, GET_REPORT_MODE, SET_THRESHOLD, GET_THRESHOLD, SET_ACTION, GET_ACTION, MACRO_TRIGGER, MANUAL_TRIGGER,
 };
 constexpr uint8_t commands_count = sizeof(allowed_commands);
 
 class Sensor {
     pin_size_t pin;
-    pin_size_t offset_pin;
     uint16_t   brightness;
 
   public:
-    Sensor(pin_size_t new_pin, pin_size_t new_offset_pin) {
+    Sensor(pin_size_t pin) : pin(pin) {
         analogReadResolution(ADC_RESOLUTION);
-        pin        = new_pin;
-        offset_pin = new_offset_pin;
     }
 
     void measure() {
-        // uint16_t offset = analogRead(offset_pin);
         brightness = analogRead(pin) ^ (1 << ADC_RESOLUTION) - 1;
-        // brightness = analogRead(pin);
     }
     uint16_t get_brightness() {
         return brightness;
@@ -117,6 +113,7 @@ struct Action {
 
 class FakeLDAT {
     Button*         trigger;
+    Button*         macro;
     Sensor*         sensor;
     uint64_t        timestamp;
     uint64_t        interval_us            = 0;
@@ -229,7 +226,7 @@ class FakeLDAT {
                     break;
 
                 case SET_REPORT_MODE:
-                    if (command[1] > 3)
+                    if (command[1] > ReportMode::COMBINED)
                         break; // :D
                     mode = (ReportMode)command[1];
                 case GET_REPORT_MODE: command[1] = mode; break;
@@ -241,7 +238,7 @@ class FakeLDAT {
                     break;
 
                 case SET_ACTION:
-                    if (command[1] > 2)
+                    if (command[1] > ActionMode::KEYBOARD)
                         break; // :D
                     action->mode   = (ActionMode)command[1];
                     action->button = command[2]; // check if key is valid for a given trigger
@@ -280,14 +277,21 @@ class FakeLDAT {
             trigger_high_timestamp = 0;
         }
     }
+    void report_macro_status() {
+        macro->measure();
+        if (macro->state_changed() && macro->get_state()) {
+            write_report(Command::MACRO_TRIGGER, timestamp, 0, 1);
+        }
+    }
 
   public:
     ReportMode mode;
     Action*    action;
 
-    FakeLDAT(pin_size_t button_pin, pin_size_t sensor_pin, pin_size_t offset_pin, uint64_t rate, ReportMode report_mode, ActionMode action_mode) {
+    FakeLDAT(pin_size_t sensor_pin, pin_size_t button_pin, pin_size_t macro_pin, uint64_t rate, ReportMode report_mode, ActionMode action_mode) {
         trigger   = new Button(button_pin);
-        sensor    = new Sensor(sensor_pin, offset_pin);
+        macro     = new Button(macro_pin);
+        sensor    = new Sensor(sensor_pin);
         action    = new Action(action_mode);
         timestamp = time_us_64();
         set_rate(rate);
@@ -295,6 +299,7 @@ class FakeLDAT {
     }
     ~FakeLDAT() {
         delete (trigger);
+        delete (macro);
         delete (sensor);
         delete (action);
     }
@@ -308,6 +313,7 @@ class FakeLDAT {
         if (mode == SUMMARY || mode == COMBINED) {
             report_summary();
         }
+        report_macro_status();
     }
     const uint64_t get_interval() {
         return interval_us;

@@ -15,7 +15,7 @@ use iced::{Alignment, Length, Subscription, Theme};
 use plotters::coord::Shift;
 use plotters::element::Rectangle;
 use plotters::series::LineSeries;
-use plotters::style::{Color, BLUE, RED, WHITE};
+use plotters::style::{Color, BLUE, GREEN, RED, WHITE};
 use plotters_iced::{Chart, ChartBuilder, ChartWidget, DrawingArea, DrawingBackend};
 use rfd::FileDialog;
 use std::collections::VecDeque;
@@ -36,7 +36,8 @@ pub struct UI {
     record_file: Option<File>,
     raw_data: VecDeque<RawReport>,    // data refactor?
     summary_data: Vec<SummaryReport>, // TODO: old data is not being removed
-    trigger: Vec<u64>,                // TODO: old data is not being removed
+    macro_timestamps: Vec<u64>,       // TODO: old data is not being removed
+    trigger_timestamps: Vec<u64>,     // TODO: old data is not being removed
     init_process: u8,
     forced_tick_rate: Option<u16>,
 }
@@ -69,7 +70,8 @@ impl Default for UI {
             record_file: None,
             raw_data: VecDeque::new(),
             summary_data: Vec::new(),
-            trigger: Vec::new(),
+            macro_timestamps: Vec::new(),
+            trigger_timestamps: Vec::new(),
             init_process: 0,
             forced_tick_rate: None,
         }
@@ -207,7 +209,7 @@ impl UI {
                     Report::Raw(raw_report) => {
                         if let Some(last_record) = self.raw_data.back() {
                             if !last_record.trigger && raw_report.trigger {
-                                self.trigger.push(raw_report.timestamp);
+                                self.trigger_timestamps.push(raw_report.timestamp);
                             }
                         }
                         record_buffer.push(format!(
@@ -244,7 +246,8 @@ impl UI {
                     Report::Threshold(threshold) => {
                         self.threshold = threshold;
                     }
-                    Report::ManualTrigger => { /* Manual trigger successful */ },
+                    Report::MacroTrigger(timestamp) => self.macro_timestamps.push(timestamp),
+                    Report::ManualTrigger => { /* Manual trigger successful */ }
                 }
             }
             if let Some(ref mut record_file) = &mut self.record_file {
@@ -538,7 +541,7 @@ impl Chart<Message> for UI {
             .draw()
             .expect("Draw mesh");
         chart
-            .draw_series(self.trigger.iter().filter_map(|trigger| {
+            .draw_series(self.trigger_timestamps.iter().filter_map(|trigger| {
                 if *trigger > min {
                     Some(Rectangle::new([(*trigger, 4095), (*trigger, 0)], RED))
                 } else {
@@ -546,6 +549,15 @@ impl Chart<Message> for UI {
                 }
             }))
             .expect("Draw triggers");
+        chart
+            .draw_series(self.macro_timestamps.iter().filter_map(|timestamp| {
+                if *timestamp > min {
+                    Some(Rectangle::new([(*timestamp, 4095), (*timestamp, 0)], GREEN))
+                } else {
+                    None
+                }
+            }))
+            .expect("Draw macros");
         // TODO: visualize the threshold
     }
 }
