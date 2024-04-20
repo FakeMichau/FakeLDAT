@@ -97,20 +97,20 @@ public:
 
 struct Action {
   ActionMode mode;
-  uint8_t button_to_press = MOUSE_LEFT;
-  // uint8_t button_to_press = 'x';
+  uint8_t button;
 
-  Action(ActionMode new_mode) {
-    mode = new_mode;
+  Action(ActionMode mode) : mode(mode) { 
+    if (mode == MOUSE) button = MOUSE_LEFT;
+    else if (mode == KEYBOARD) button = 'x';
   }
 
   void press() {
-    if (mode == MOUSE) Mouse.press(button_to_press);
-    if (mode == KEYBOARD) Keyboard.press(button_to_press);
+    if (mode == MOUSE) Mouse.press(button);
+    else if (mode == KEYBOARD) Keyboard.press(button);
   }
   void release() {
-    if (mode == MOUSE) Mouse.release(button_to_press);
-    if (mode == KEYBOARD) Keyboard.release(button_to_press);
+    if (mode == MOUSE) Mouse.release(button);
+    else if (mode == KEYBOARD) Keyboard.release(button);
   }
 };
 
@@ -178,26 +178,6 @@ class FakeLDAT {
     bytes[15] = checksum;
     Serial.write(bytes, sizeof(bytes));
   }
-
-
-public:
-  ReportMode mode;
-  Action* action;
-
-  FakeLDAT(pin_size_t button_pin, pin_size_t sensor_pin, pin_size_t offset_pin, uint64_t rate, ReportMode report_mode, ActionMode action_mode) {
-    trigger = new Button(button_pin);
-    sensor = new Sensor(sensor_pin, offset_pin);
-    action = new Action(action_mode);
-    timestamp = time_us_64();
-    set_rate(rate);
-    mode = report_mode;
-  }
-  ~FakeLDAT() {
-    delete(trigger);
-    delete(sensor);
-    delete(action);
-  }
-
   void update() {
     sensor->measure();
     timestamp = time_us_64();
@@ -263,10 +243,10 @@ public:
       case SET_ACTION:
         if (command[1] > 2) break; // :D
         action->mode = (ActionMode)command[1];
-        action->button_to_press = command[2];  // check if key is valid for a given trigger
+        action->button = command[2];  // check if key is valid for a given trigger
       case GET_ACTION:
         command[1] = action->mode;
-        command[2] = action->button_to_press;
+        command[2] = action->button;
         break;
 
       case MANUAL_TRIGGER:
@@ -289,9 +269,6 @@ public:
   void set_rate(uint64_t rate) {
     interval_us = 1000000 / rate;
   }
-  const uint64_t get_interval() {
-    return interval_us;
-  }
   void report_raw() {
     auto trigger_state = trigger->get_state() || trigger_override == OVERRIDE_IN_PROGRESS || trigger_override == PRESS;
     write_report(Command::REPORT_RAW, timestamp, sensor->get_brightness(), (uint8_t)trigger_state);
@@ -306,4 +283,38 @@ public:
       trigger_high_timestamp = 0;
     }
   }
+
+
+public:
+  ReportMode mode;
+  Action* action;
+
+  FakeLDAT(pin_size_t button_pin, pin_size_t sensor_pin, pin_size_t offset_pin, uint64_t rate, ReportMode report_mode, ActionMode action_mode) {
+    trigger = new Button(button_pin);
+    sensor = new Sensor(sensor_pin, offset_pin);
+    action = new Action(action_mode);
+    timestamp = time_us_64();
+    set_rate(rate);
+    mode = report_mode;
+  }
+  ~FakeLDAT() {
+    delete(trigger);
+    delete(sensor);
+    delete(action);
+  }
+
+  void tick() {
+    check_for_commands();
+    update();
+    if (mode == RAW || mode == COMBINED) {
+      report_raw();
+    }
+    if (mode == SUMMARY || mode == COMBINED) {
+      report_summary();
+    }
+  }
+  const uint64_t get_interval() {
+    return interval_us;
+  }
+
 };

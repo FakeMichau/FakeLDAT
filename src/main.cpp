@@ -18,14 +18,7 @@ void loop() {
   static uint64_t timestamp = 0;
   const uint64_t interval_us = m_device->get_interval();
 
-  m_device->check_for_commands();
-  m_device->update();
-  if (m_device->mode == RAW || m_device->mode == COMBINED) {
-    m_device->report_raw();
-  }
-  if (m_device->mode == SUMMARY || m_device->mode == COMBINED) {
-    m_device->report_summary();
-  }
+  m_device->tick();
 
   uint64_t time_delta = time_us_64() - timestamp;
   uint64_t time_to_sleep = interval_us < time_delta ? 0 : interval_us - time_delta; // zero meaning it's running behind
