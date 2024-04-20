@@ -1,5 +1,5 @@
-#ifndef SRC_TYPES_H_
-#define SRC_TYPES_H_
+#ifndef SRC_FAKELDAT_H_
+#define SRC_FAKELDAT_H_
 #include <Arduino.h>
 #include <Keyboard.h>
 #include <Mouse.h>
@@ -313,4 +313,4 @@ class FakeLDAT {
         return interval_us;
     }
 };
-#endif // SRC_TYPES_H_
+#endif // SRC_FAKELDAT_H_
