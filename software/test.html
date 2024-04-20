@@ -1,48 +1,44 @@
-
 <head>
   <style>
     body {
       background-color: black;
-      color: white;
     }
+
     .white {
       background-color: white !important;
     }
   </style>
+  <script>
+    let delay = 0; // in ms
+    let key = 'x';
+    let black_to_white = true;
+
+    function addWhiteClass() {
+      document.body.classList.add('white');
+    }
+    function removeWhiteClass() {
+      document.body.classList.remove('white');
+    }
+
+    if (black_to_white) {
+      document.addEventListener('mousedown', () => setTimeout(addWhiteClass, delay));
+      document.addEventListener('mouseup', () => setTimeout(removeWhiteClass, delay));
+      document.addEventListener('keydown', (event) => {
+        if (event.key === key) setTimeout(addWhiteClass, delay);
+      });
+      document.addEventListener('keyup', (event) => {
+        if (event.key === key) setTimeout(removeWhiteClass, delay);
+      });
+    } else {
+      document.body.classList.add('white');
+      document.addEventListener('mouseup', () => setTimeout(addWhiteClass, delay));
+      document.addEventListener('mousedown', () => setTimeout(removeWhiteClass, delay));
+      document.addEventListener('keyup', (event) => {
+        if (event.key === key) setTimeout(addWhiteClass, delay);
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key === key) setTimeout(removeWhiteClass, delay);
+      });
+    }
+  </script>
 </head>
-<body>
-
-<script>
-  let delay = 0;
-  // document.addEventListener('keyup', function(event) {
-  //   if (event.key === 'x') {
-  //     setTimeout(() => document.body.classList.toggle('white'), delay)
-  //   }
-  // });
-
-  // document.addEventListener('keydown', function(event) {
-  //   if (event.key === 'x') {
-  //     setTimeout(() => document.body.classList.add('white'), delay)
-  //   }
-  // });
-  // document.addEventListener('keyup', function(event) {
-  //   if (event.key === 'x') {
-  //     setTimeout(() => document.body.classList.remove('white'), delay)
-  //   }
-  // });
-  if (true) {
-    document.addEventListener('mousedown', function(event) {
-      setTimeout(() => document.body.classList.add('white'), delay)
-    });
-    document.addEventListener('mouseup', function(event) {
-      setTimeout(() => document.body.classList.remove('white'), delay)
-    });
-  } else {
-    document.addEventListener('mouseup', function(event) {
-      setTimeout(() => document.body.classList.add('white'), delay)
-    });
-    document.addEventListener('mousedown', function(event) {
-      setTimeout(() => document.body.classList.remove('white'), delay)
-    });
-  }
-</script>
