@@ -269,11 +269,12 @@ class FakeLDAT {
         write_report(Command::REPORT_RAW, timestamp, sensor->get_brightness(), (uint8_t)trigger_state);
     }
     void report_summary() {
-        uint16_t threshold = calc_threshold(sensor->get_brightness());
+        uint16_t absolute_threshold = calc_threshold(sensor->get_brightness());
         if (trigger_override == NOOVERRIDE && trigger->state_changed() && trigger->get_state() == trigger_on_press) {
             trigger_high_timestamp = timestamp;
-        } else if (trigger_high_timestamp && sensor->get_brightness() > threshold) {
-            write_report(Command::REPORT_SUMMARY, timestamp - trigger_high_timestamp, threshold, 1);
+        } else if (trigger_high_timestamp &&
+                   ((threshold > 0 && sensor->get_brightness() > absolute_threshold) || (threshold < 0 && sensor->get_brightness() < absolute_threshold))) {
+            write_report(Command::REPORT_SUMMARY, timestamp - trigger_high_timestamp, absolute_threshold, 1);
             trigger_high_timestamp = 0;
         }
     }

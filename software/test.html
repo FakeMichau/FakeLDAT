@@ -30,11 +30,19 @@
   //     setTimeout(() => document.body.classList.remove('white'), delay)
   //   }
   // });
-
-  document.addEventListener('mousedown', function(event) {
-    setTimeout(() => document.body.classList.add('white'), delay)
-  });
-  document.addEventListener('mouseup', function(event) {
-    setTimeout(() => document.body.classList.remove('white'), delay)
-  });
+  if (true) {
+    document.addEventListener('mousedown', function(event) {
+      setTimeout(() => document.body.classList.add('white'), delay)
+    });
+    document.addEventListener('mouseup', function(event) {
+      setTimeout(() => document.body.classList.remove('white'), delay)
+    });
+  } else {
+    document.addEventListener('mouseup', function(event) {
+      setTimeout(() => document.body.classList.add('white'), delay)
+    });
+    document.addEventListener('mousedown', function(event) {
+      setTimeout(() => document.body.classList.remove('white'), delay)
+    });
+  }
 </script>
