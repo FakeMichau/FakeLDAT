@@ -2,5 +2,4 @@
 .vscode
 .venv
 README
-/software/fakeldat-analyzer/target
-/software/fakeldat-gui/target
+/software/fakeldat-app/target
