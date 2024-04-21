@@ -21,6 +21,8 @@ enum Command {
     /// Set a setting
     #[command(subcommand)]
     Set(SettingSet),
+    /// Set a setting
+    ManualTrigger
 }
 
 #[derive(clap::Subcommand)]
@@ -181,6 +183,9 @@ fn handle_fakeldat() -> Result<(), Error> {
                 SettingSet::Threshold(threshold) => fakeldat.set_threshold(threshold.value),
                 SettingSet::Action(action) => fakeldat.set_action(action.into()),
             },
+            Command::ManualTrigger => {
+                return fakeldat.manual_trigger();
+            }
         }?;
         loop {
             fakeldat.poll_bulk_data()?;
