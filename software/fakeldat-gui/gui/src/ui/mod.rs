@@ -525,11 +525,15 @@ impl Chart<Message> for UI {
             .x_label_area_size(20)
             .build_cartesian_2d(min..max, 0u64..4096)
             .unwrap();
+        
+        let amount_to_skip = self.raw_data.len() / 4096 + 1;
         chart
             .draw_series(LineSeries::new(
                 self.raw_data
                     .iter()
-                    .map(|report| (report.timestamp, report.brightness.into())),
+                    .enumerate()
+                    .filter(|(i, _)| i % amount_to_skip == 0)
+                    .map(|(_, report)| (report.timestamp, report.brightness.into())),
                 BLUE.stroke_width(2),
             ))
             .expect("Draw brightness line");
