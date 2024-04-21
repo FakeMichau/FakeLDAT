@@ -228,7 +228,7 @@ impl UI {
                         self.summary_data.push(summary_report);
                     }
                     Report::PollRate(pollrate) => {
-                        self.selected_pollrate = pollrate.try_into().expect("Wrong poll rate");
+                        self.selected_pollrate = pollrate.into();
                     }
                     Report::Action(action_mode) => match action_mode {
                         ActionMode::Mouse(button) => {

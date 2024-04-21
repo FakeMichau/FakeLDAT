@@ -81,19 +81,16 @@ impl std::fmt::Display for PollRate {
     }
 }
 
-impl TryFrom<u16> for PollRate {
-    type Error = ();
-
-    fn try_from(value: u16) -> Result<Self, Self::Error> {
+impl From<u16> for PollRate {
+    fn from(value: u16) -> Self {
         match value {
-            500 => Ok(Self::_500),
-            1000 => Ok(Self::_1000),
-            2000 => Ok(Self::_2000),
-            4000 => Ok(Self::_4000),
-            x if x > 7750 && x < 8250 => Ok(Self::_8000),
-            x if x > 15500 && x < 16500 => Ok(Self::_16000),
-            x if x > 31000 && x < 33000 => Ok(Self::_32000),
-            _ => Err(()),
+            x if x > 24000 => Self::_32000,
+            x if x > 12000 => Self::_16000,
+            x if x > 6000 => Self::_8000,
+            x if x > 3000 => Self::_4000,
+            x if x > 1500 => Self::_2000,
+            x if x > 750 => Self::_1000,
+            _ => Self::_500,
         }
     }
 }
