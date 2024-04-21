@@ -6,7 +6,4 @@ lto = true
 [workspace]
 resolver = "2"
 
-members = [
-    "gui",
-    "fakeldat_lib"
-]
+members = ["gui", "fakeldat_lib", "cli"]
