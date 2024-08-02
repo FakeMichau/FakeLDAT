@@ -12,7 +12,7 @@ use iced::widget::{
     Scrollable, Space,
 };
 use iced::{Alignment, Length, Subscription, Theme};
-use plotters::coord::Shift;
+use plotters::{coord::Shift, style::full_palette::ORANGE};
 use plotters::element::Rectangle;
 use plotters::series::LineSeries;
 use plotters::style::{Color, BLUE, GREEN, RED, WHITE};
@@ -213,9 +213,10 @@ impl UI {
                             }
                         }
                         record_buffer.push(format!(
-                            "{},{},{}",
+                            "{},{},{},{}",
                             raw_report.timestamp,
                             raw_report.brightness,
+                            raw_report.audio,
                             u8::from(raw_report.trigger)
                         ));
                         self.push_data(raw_report);
@@ -538,21 +539,31 @@ impl Chart<Message> for UI {
             ))
             .expect("Draw brightness line");
         chart
+            .draw_series(LineSeries::new(
+                self.raw_data
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| i % amount_to_skip == 0)
+                    .map(|(_, report)| (report.timestamp, report.audio.into())),
+                ORANGE.stroke_width(2),
+            ))
+            .expect("Draw audio line");
+        chart
+        .draw_series(self.trigger_timestamps.iter().filter_map(|trigger| {
+            if *trigger > min {
+                Some(Rectangle::new([(*trigger, 4095), (*trigger, 0)], GREEN))
+            } else {
+                None
+            }
+        }))
+        .expect("Draw triggers");
+        chart
             .configure_mesh()
             .disable_mesh()
             .disable_x_axis()
             .y_label_formatter(&ToString::to_string)
             .draw()
             .expect("Draw mesh");
-        chart
-            .draw_series(self.trigger_timestamps.iter().filter_map(|trigger| {
-                if *trigger > min {
-                    Some(Rectangle::new([(*trigger, 4095), (*trigger, 0)], RED))
-                } else {
-                    None
-                }
-            }))
-            .expect("Draw triggers");
         chart
             .draw_series(self.macro_timestamps.iter().filter_map(|timestamp| {
                 if *timestamp > min {

@@ -45,7 +45,7 @@ constexpr uint8_t commands_count = sizeof(allowed_commands);
 
 class Sensor {
     pin_size_t pin;
-    uint16_t   brightness;
+    uint16_t   value;
 
   public:
     Sensor(pin_size_t pin) : pin(pin) {
@@ -53,10 +53,10 @@ class Sensor {
     }
 
     void measure() {
-        brightness = analogRead(pin) ^ (1 << ADC_RESOLUTION) - 1;
+        value = analogRead(pin) ^ (1 << ADC_RESOLUTION) - 1;
     }
-    uint16_t get_brightness() {
-        return brightness;
+    uint16_t get_value() {
+        return value;
     }
 };
 
@@ -114,7 +114,8 @@ struct Action {
 class FakeLDAT {
     Button*         trigger;
     Button*         macro;
-    Sensor*         sensor;
+    Sensor*         light_sensor;
+    Sensor*         audio_sensor;
     uint64_t        timestamp;
     uint64_t        interval_us            = 0;
     uint64_t        trigger_high_timestamp = 0;
@@ -160,7 +161,7 @@ class FakeLDAT {
         uint8_t checksum           = calc_checksum(buf, last_element_index);
         return buf[last_element_index] == checksum;
     }
-    void write_report(uint8_t command, uint64_t timestamp, uint16_t brightness, uint8_t trigger) {
+    void write_report(uint8_t command, uint64_t timestamp, uint16_t brightness, uint16_t audio, uint8_t trigger) {
         uint8_t checksum = command;
         uint8_t bytes[16]{};
         bytes[0] = command;
@@ -172,14 +173,19 @@ class FakeLDAT {
             bytes[9 + i] = (brightness >> (8 * i)) & 0xFF;
             checksum += bytes[9 + i];
         }
-        bytes[11] = trigger;
+        for (int i = 0; i < sizeof(audio); i++) {
+            bytes[11 + i] = (audio >> (8 * i)) & 0xFF;
+            checksum += bytes[11 + i];
+        }
+        bytes[13] = trigger;
         checksum += trigger;
-        // 12, 13, 14 are empty
+        // 14 is empty
         bytes[15] = checksum;
         Serial.write(bytes, sizeof(bytes));
     }
     void update() {
-        sensor->measure();
+        light_sensor->measure();
+        audio_sensor->measure();
         timestamp = time_us_64();
         switch (trigger_override) {
             case RELEASE:
@@ -266,22 +272,22 @@ class FakeLDAT {
     }
     void report_raw() {
         auto trigger_state = trigger->get_state() || trigger_override == OVERRIDE_IN_PROGRESS || trigger_override == PRESS;
-        write_report(Command::REPORT_RAW, timestamp, sensor->get_brightness(), (uint8_t)trigger_state);
+        write_report(Command::REPORT_RAW, timestamp, light_sensor->get_value(), audio_sensor->get_value(), (uint8_t)trigger_state);
     }
     void report_summary() {
-        uint16_t absolute_threshold = calc_threshold(sensor->get_brightness());
+        uint16_t absolute_threshold = calc_threshold(light_sensor->get_value());
         if (trigger_override == NOOVERRIDE && trigger->state_changed() && trigger->get_state() == trigger_on_press) {
             trigger_high_timestamp = timestamp;
         } else if (trigger_high_timestamp &&
-                   ((threshold > 0 && sensor->get_brightness() > absolute_threshold) || (threshold < 0 && sensor->get_brightness() < absolute_threshold))) {
-            write_report(Command::REPORT_SUMMARY, timestamp - trigger_high_timestamp, absolute_threshold, 1);
+                   ((threshold > 0 && light_sensor->get_value() > absolute_threshold) || (threshold < 0 && light_sensor->get_value() < absolute_threshold))) {
+            write_report(Command::REPORT_SUMMARY, timestamp - trigger_high_timestamp, absolute_threshold, 0, 1);
             trigger_high_timestamp = 0;
         }
     }
     void report_macro_status() {
         macro->measure();
         if (macro->state_changed() && macro->get_state()) {
-            write_report(Command::MACRO_TRIGGER, timestamp, 0, 1);
+            write_report(Command::MACRO_TRIGGER, timestamp, 0, 0, 1);
         }
     }
 
@@ -289,19 +295,21 @@ class FakeLDAT {
     ReportMode mode;
     Action*    action;
 
-    FakeLDAT(pin_size_t sensor_pin, pin_size_t button_pin, pin_size_t macro_pin, uint64_t rate, ReportMode report_mode, ActionMode action_mode) {
-        trigger   = new Button(button_pin);
-        macro     = new Button(macro_pin);
-        sensor    = new Sensor(sensor_pin);
-        action    = new Action(action_mode);
-        timestamp = time_us_64();
+    FakeLDAT(pin_size_t lightsensor_pin, pin_size_t audiosensor_pin, pin_size_t button_pin, pin_size_t macro_pin, uint64_t rate, ReportMode report_mode, ActionMode action_mode) {
+        trigger      = new Button(button_pin);
+        macro        = new Button(macro_pin);
+        light_sensor = new Sensor(lightsensor_pin);
+        audio_sensor = new Sensor(audiosensor_pin);
+        action       = new Action(action_mode);
+        timestamp    = time_us_64();
         set_rate(rate);
         mode = report_mode;
     }
     ~FakeLDAT() {
         delete (trigger);
         delete (macro);
-        delete (sensor);
+        delete (light_sensor);
+        delete (audio_sensor);
         delete (action);
     }
 

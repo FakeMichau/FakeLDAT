@@ -264,6 +264,7 @@ pub enum Report {
 pub struct RawReport {
     pub timestamp: u64,
     pub brightness: u16,
+    pub audio: u16,
     pub trigger: bool,
 }
 
@@ -381,7 +382,8 @@ impl FakeLDAT {
             Command::ReportRaw => Ok(Report::Raw(RawReport {
                 timestamp: u64::from_le_bytes(buf[1..=8].try_into().unwrap()),
                 brightness: u16::from_le_bytes(buf[9..=10].try_into().unwrap()),
-                trigger: buf[11] == 1,
+                audio: u16::from_le_bytes(buf[11..=12].try_into().unwrap()),
+                trigger: buf[13] == 1,
             })),
             Command::ReportSummary => Ok(Report::Summary(SummaryReport {
                 delay: u64::from_le_bytes(buf[1..=8].try_into().unwrap()),

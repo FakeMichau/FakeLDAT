@@ -4,12 +4,14 @@ FakeLDAT* m_device;
 
 int       usb_hid_poll_interval = 1; // default is 10ms
 uint64_t  time_to_sleep         = 0;
-void      setup() {
+
+void setup() {
     Serial.begin();
-    pin_size_t macro_pin  = 20;
-    pin_size_t button_pin = 16;
-    pin_size_t sensor_pin = 26;
-    m_device              = new FakeLDAT(sensor_pin, button_pin, macro_pin, 2000, RAW, MOUSE);
+    pin_size_t macro_pin        = 20;
+    pin_size_t button_pin       = 16;
+    pin_size_t light_sensor_pin = 26;
+    pin_size_t audio_sensor_pin = 28;
+    m_device                    = new FakeLDAT(light_sensor_pin, audio_sensor_pin, button_pin, macro_pin, 2000, RAW, MOUSE);
 }
 
 void loop() {
